@@ -616,3 +616,71 @@ test.each([undefined, false])("Desktop GET pending %s preserves a cached pending
     globalThis.fetch = originalFetch;
   }
 });
+
+test.each([true, false])("Desktop settings retain an optimistic preference during polling and settle save success=%s", async (saveSucceeds) => {
+  const originalFetch = globalThis.fetch;
+  const apiBase = `/authless-optimistic-${saveSucceeds}`;
+  let latest: Dash | undefined;
+  let syncCalls = 0;
+  const saveResponse = Promise.withResolvers<Response>();
+  const initialSettings: SettingsData = { codexAutoStart: true, port: 10100, hostname: "127.0.0.1" };
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith("/api/settings")) {
+      return init?.method === "PUT" ? saveResponse.promise : Response.json(initialSettings);
+    }
+    if (String(input).endsWith("/api/sync")) {
+      syncCalls += 1;
+      return Response.json({ ok: true, status: "skipped" });
+    }
+    return Response.json({}, { status: 503 });
+  }) as typeof fetch;
+  function Harness() {
+    const data = useDashboardData(apiBase);
+    useEffect(() => { latest = data; }, [data]);
+    return null;
+  }
+  let save: Promise<void> | undefined;
+  try {
+    const { createRoot } = await import("react-dom/client");
+    await act(async () => { root = createRoot(host); root.render(<LanguageProvider><Harness /></LanguageProvider>); });
+    expect(latest?.settings?.codexDesktopAuthless).toBeUndefined();
+    await act(async () => { save = latest!.toggleCodexDesktopAuthless(); });
+    expect(latest?.settingsSaving).toBe(true);
+    expect(latest?.settings?.codexDesktopAuthless).toBe(true);
+    expect(latest?.settings?.catalogRefreshPending).toBeUndefined();
+    // A published snapshot must not replace a mutation that has not settled yet.
+    await act(async () => {
+      setClientResourceData(`dashboard-settings:${apiBase}`, { settings: initialSettings });
+    });
+    expect(latest?.settingsSaving).toBe(true);
+    expect(latest?.settings?.codexDesktopAuthless).toBe(true);
+    await act(async () => {
+      saveResponse.resolve(saveSucceeds
+        ? Response.json({ codexDesktopAuthless: true, catalogRefreshPending: false })
+        : Response.json({ error: "save unavailable" }, { status: 503 }));
+      await save;
+    });
+    expect(latest?.settingsSaving).toBe(false);
+    expect(latest?.settings?.codexDesktopAuthless).toBe(saveSucceeds ? true : undefined);
+    expect(latest?.settings?.catalogRefreshPending).toBe(saveSucceeds ? true : undefined);
+    expect(syncCalls).toBe(saveSucceeds ? 1 : 0);
+    expect(readSessionListCache<{ settings: SettingsData }>(`ocx.dash.controls.v1:${apiBase}`)?.settings).toEqual(latest!.settings!);
+    // A later, settled poll still updates unrelated settings and preserves any receipt.
+    await act(async () => {
+      setClientResourceData(`dashboard-settings:${apiBase}`, {
+        settings: { ...initialSettings, codexDesktopAuthless: saveSucceeds ? true : undefined, port: 10200 },
+      });
+    });
+    expect(latest?.settings?.port).toBe(10200);
+    expect(latest?.settings?.catalogRefreshPending).toBe(saveSucceeds ? true : undefined);
+  } finally {
+    await act(async () => {
+      saveResponse.resolve(Response.json({ error: "test cleanup" }, { status: 503 }));
+      await save;
+      root?.unmount();
+    });
+    root = null;
+    clearClientResourceStoresForTests();
+    globalThis.fetch = originalFetch;
+  }
+});

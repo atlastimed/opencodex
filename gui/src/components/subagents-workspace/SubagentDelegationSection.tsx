@@ -63,6 +63,13 @@ export default function SubagentDelegationSection({
   const nativeMayUseV2 = ultraMode.enabled || (ultraMode.multiAgentMode !== "v1"
     && !(ultraMode.multiAgentMode === "v2" && ultraMode.keepNativeChatGptOnV1));
   const showV2Compatibility = !ultraLoadFailed && ultraMode.loaded === true && routedPreferred && nativeMayUseV2;
+  const availableModelSet = new Set(availableModels);
+  const fallbackSet = new Set(fallback);
+  const [pollDraft, setPollDraft] = useState(() => ({ pollMs: fallbackPollMs, text: String(fallbackPollMs) }));
+  // Keep blank/invalid input text while reconciling accepted settings from a load or save.
+  if (!Object.is(pollDraft.pollMs, fallbackPollMs)) {
+    setPollDraft({ pollMs: fallbackPollMs, text: Number.isFinite(fallbackPollMs) ? String(fallbackPollMs) : "" });
+  }
   const fallbackControlsRef = useRef<HTMLDivElement>(null);
   const [identity, setIdentity] = useState(() => ({
     models: fallback,
@@ -172,7 +179,7 @@ export default function SubagentDelegationSection({
           {fallback.map((modelName, index) => (
             <div key={rows[index].id} className="swi-fallback-row">
               <span className="swi-fallback-model">{index + 1}. {modelName}
-                {!availableModels.includes(modelName) && <span className="muted setting-hint">{t("sub.fallbackUnavailable")}</span>}
+                {!availableModelSet.has(modelName) && <span className="muted setting-hint">{t("sub.fallbackUnavailable")}</span>}
               </span>
               <span className="swi-fallback-actions">
                 <button type="button" className="btn btn-ghost btn-icon btn-sm" data-action="up" onClick={() => moveFallback(index, -1)} disabled={fallbackBusy || index === 0} aria-label={t("sub.moveUp", { m: modelName })}><IconArrowUp /></button>
@@ -188,10 +195,16 @@ export default function SubagentDelegationSection({
           ))}
           <Select value="" label={t("sub.fallbackAdd")} options={[
             { value: "", label: t("sub.fallbackAdd") },
-            ...availableModels.filter(modelName => !fallback.includes(modelName)).map(modelName => ({ value: modelName, label: modelName })),
-          ]} onChange={value => { if (value && !fallback.includes(value)) onFallbackChange([...fallback, value]); }} disabled={fallbackBusy} />
+            ...availableModels.filter(modelName => !fallbackSet.has(modelName)).map(modelName => ({ value: modelName, label: modelName })),
+          ]} onChange={value => { if (value && !fallbackSet.has(value)) onFallbackChange([...fallback, value]); }} disabled={fallbackBusy} />
           <label className="setting-hint">{t("sub.fallbackPoll")}
-            <input className="input" type="number" min={5000} max={600000} step={1000} value={fallbackPollMs} onChange={e => onFallbackPollMsChange(Number(e.target.value))} disabled={fallbackBusy} aria-invalid={!validPollMs} /> ms
+            <input className="input" type="number" min={5000} max={600000} step={1000} value={pollDraft.text} onChange={e => {
+              const text = e.currentTarget.value;
+              const parsed = Number(text);
+              const pollMs = text.trim() !== "" && Number.isFinite(parsed) ? parsed : Number.NaN;
+              setPollDraft({ pollMs, text });
+              onFallbackPollMsChange(pollMs);
+            }} disabled={fallbackBusy} aria-invalid={!validPollMs} /> ms
           </label>
           {!validPollMs && <div className="setting-hint" role="alert">{t("sub.fallbackPollInvalid")}</div>}
           <button type="button" className="btn btn-primary btn-sm" onClick={onFallbackSave} disabled={fallbackBusy || !validPollMs}>{t("common.save")}</button>

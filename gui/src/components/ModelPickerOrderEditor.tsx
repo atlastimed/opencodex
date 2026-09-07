@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { createBoundedFetch, type BoundedFetch } from "../bounded-fetch";
 import { readJsonOrThrow } from "../fetch-json";
 import { IconArrowDown, IconArrowUp, IconGrip } from "../icons";
@@ -133,7 +133,14 @@ export default function ModelPickerOrderEditor({ apiBase, active, identities, on
     setAnnouncement(t("models.pickerOrder.position", { model: id, position: next.indexOf(id) + 1, total: next.length }));
     clearDrag();
   };
-  const movable = (id: string) => !disabled && draft.includes(id) && !snapshot?.fixed.includes(id);
+  const draftSet = new Set(draft);
+  const fixedSet = new Set(snapshot?.fixed);
+  const movable = (id: string) => !disabled && draftSet.has(id) && !fixedSet.has(id);
+  const dragOver = (event: DragEvent<HTMLLIElement>, id: string) => {
+    if (!lifetime.current.drag || lifetime.current.drag.id === id || !movable(lifetime.current.drag.id) || !movable(id)
+      || !event.dataTransfer.types.includes(DRAG_TYPE)) return;
+    event.preventDefault(); event.dataTransfer.dropEffect = "move"; setOver(id);
+  };
   return <section className="picker-order-editor" aria-label={t("models.pickerOrder.custom")} aria-busy={busy}>
     <p className="muted text-label">{t("models.pickerOrder.editorHint")}</p>
     {(blocked || identityChanged) && <p role="alert">{t(blocked ?? "models.pickerOrder.changed")}</p>}
@@ -141,13 +148,9 @@ export default function ModelPickerOrderEditor({ apiBase, active, identities, on
     {snapshot && draft.length === 0 && <p>{t("models.pickerOrder.empty")}</p>}
     <ol className="picker-order-list">
       {draft.map((id, index) => {
-        const fixed = snapshot?.fixed.includes(id) === true;
+        const fixed = fixedSet.has(id);
         return <li key={id} className={`picker-order-row${dragging === id ? " cwi-target-row--dragging" : ""}${over === id ? " cwi-target-row--drop" : ""}`}
-          onDragOver={event => {
-            if (!lifetime.current.drag || lifetime.current.drag.id === id || !movable(lifetime.current.drag.id) || !movable(id)
-              || !event.dataTransfer.types.includes(DRAG_TYPE)) return;
-            event.preventDefault(); event.dataTransfer.dropEffect = "move"; setOver(id);
-          }}
+          onDragOver={event => dragOver(event, id)}
           onDragLeave={() => setOver(null)}
           onDrop={event => {
             const source = lifetime.current.drag;
@@ -167,12 +170,12 @@ export default function ModelPickerOrderEditor({ apiBase, active, identities, on
           {fixed && <span className="muted text-caption">{t("models.pickerOrder.featured")}</span>}
           <span className="picker-order-actions">
             <button type="button" className="btn btn-ghost btn-sm"
-              disabled={disabled || fixed || index === 0 || snapshot?.fixed.includes(draft[index - 1]!)}
+              disabled={disabled || fixed || index === 0 || fixedSet.has(draft[index - 1]!)}
               aria-label={t("models.pickerOrder.upModel", { model: id })}
               onClick={() => move(id, stepPickerOrder(draft, id, -1, snapshot?.fixed ?? []))}>
               <IconArrowUp width={14} height={14} aria-hidden="true" /></button>
             <button type="button" className="btn btn-ghost btn-sm"
-              disabled={disabled || fixed || index === draft.length - 1 || snapshot?.fixed.includes(draft[index + 1]!)}
+              disabled={disabled || fixed || index === draft.length - 1 || fixedSet.has(draft[index + 1]!)}
               aria-label={t("models.pickerOrder.downModel", { model: id })}
               onClick={() => move(id, stepPickerOrder(draft, id, 1, snapshot?.fixed ?? []))}>
               <IconArrowDown width={14} height={14} aria-hidden="true" /></button>

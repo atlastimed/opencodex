@@ -82,10 +82,13 @@ function transfer() {
     setData: (type: string, value: string) => { data.set(type, value); }, getData: (type: string) => data.get(type) ?? "" };
 }
 async function dragEvent(target: Element, type: string, dataTransfer: ReturnType<typeof transfer>) {
+  let defaultPrevented = false;
   await act(async () => {
     const event = new win.Event(type, { bubbles: true, cancelable: true });
     Object.defineProperty(event, "dataTransfer", { value: dataTransfer }); target.dispatchEvent(event);
+    defaultPrevented = event.defaultPrevented;
   });
+  return defaultPrevented;
 }
 async function drop(source: string, target: string) {
   const data = transfer();
@@ -165,6 +168,10 @@ test("external, self, fixed and expired drag tokens cannot reorder", async () =>
   await dragEvent(row("p/b"), "drop", external); expect(order()).toEqual(original);
   await drop("p/a", "p/a"); await drop("p/a", "p/f"); expect(order()).toEqual(original);
   const local = transfer(); await dragEvent(button("Drag p/a"), "dragstart", local);
+  const wrongType = transfer(); wrongType.setData("text/plain", "p/a");
+  expect(await dragEvent(row("p/b"), "dragover", wrongType)).toBe(false);
+  expect(await dragEvent(row("p/f"), "dragover", local)).toBe(false);
+  expect(await dragEvent(row("p/b"), "dragover", local)).toBe(true);
   await dragEvent(row("p/b"), "drop", external); expect(order()).toEqual(original);
   await dragEvent(row("p/b"), "drop", local); expect(order()).toEqual(original);
   await dragEvent(button("Drag p/a"), "dragstart", local);
@@ -182,6 +189,13 @@ test("preflight roster drift blocks PUT, preserves draft, and requires explicit 
   await click("Reload and discard draft"); expect(order()).toEqual(changedDraft);
   await reply(2, updated); expect(order()).toEqual(["p/b", "p/a", "p/c", "p/f"]);
   expect(button("Move p/a down").disabled).toBe(false); expect(receipts).toEqual([]);
+  expect(button("Drag p/b").disabled).toBe(true);
+  expect(button("Drag p/f").disabled).toBe(false);
+  expect(button("Move p/a up").disabled).toBe(true);
+  await drop("p/b", "p/f"); expect(order()).toEqual(["p/b", "p/a", "p/c", "p/f"]);
+  await drop("p/f", "p/a"); expect(order()).toEqual(["p/b", "p/f", "p/a", "p/c"]);
+  await click("Save draft"); await reply(3, updated);
+  expect(requests[4]?.body).toEqual({ pickerOrder: ["p/b", "p/f", "p/a", "p/c"], pickerOrderMode: null });
 });
 
 for (const failure of ["rejected", "malformed JSON", "malformed receipt", "network"] as const)

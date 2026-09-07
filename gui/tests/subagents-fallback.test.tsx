@@ -205,7 +205,7 @@ function pollInput(): HTMLInputElement {
   return input;
 }
 
-async function changePollMs(value: number) {
+async function changePollMs(value: number | string) {
   await act(async () => {
     const input = pollInput();
     Object.getOwnPropertyDescriptor(testWindow.HTMLInputElement.prototype, "value")!.set!.call(input, String(value));
@@ -635,6 +635,29 @@ test.each([false, true])("a captured old fallback GET cannot overwrite a newer d
   expect(pollInput().value).toBe("90000");
   expect(cached()).toEqual(saveNewer ? committedB : committedA);
   expect(putBodies()).toEqual(saveNewer ? [{ models: ["a-3"], pollMs: 90_000 }] : []);
+});
+
+test.each(["", "1e309"])("blank or overflowing polling input stays invalid until corrected (%s)", async value => {
+  await mount();
+  const committed = cached();
+  await changePollMs(value);
+  expect(pollInput().value).toBe(value);
+  expect(pollInput().getAttribute("aria-invalid")).toBe("true");
+  expect(editor().querySelector('[role="alert"]')?.textContent).toContain(en["sub.fallbackPollInvalid"]);
+  expect(saveButton().disabled).toBe(true);
+  await act(async () => { saveButton().click(); });
+  expect(putBodies()).toEqual([]);
+  expect(cached()).toEqual(committed);
+
+  // An unrelated roster edit must not restore the last valid interval or coerce the blank to zero.
+  await click(labelledButton(container, en["sub.workspace.addToFeatured"].replace("{m}", "a-3")));
+  expect(pollInput().value).toBe(value);
+  expect(saveButton().disabled).toBe(true);
+  await changePollMs(90_000);
+  expect(pollInput().getAttribute("aria-invalid")).toBe("false");
+  expect(editor().querySelector('[role="alert"]')).toBeNull();
+  await click(saveButton());
+  expect(putBodies()).toEqual([{ models: ["a-2"], pollMs: 90_000 }]);
 });
 
 test("invalid polling intervals disable Save without a PUT or cache mutation, and a valid interval recovers", async () => {
