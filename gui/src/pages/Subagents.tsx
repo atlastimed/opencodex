@@ -321,7 +321,7 @@ export default function Subagents({ apiBase }: { apiBase: string }) {
       )}
       <SubagentsWorkspace
         available={available}
-        fallbackAvailable={fallbackAvailable}
+        fallbackAvailable={fallbackAvailable ?? []}
         chosen={chosen}
         busy={busy}
         onToggle={toggle}
