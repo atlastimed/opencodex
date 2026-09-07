@@ -361,7 +361,12 @@ export function useDashboardData(apiBase: string) {
   useEffect(() => {
     const data = settingsPoll.data;
     if (!data) return;
-    if (data.settings !== undefined) setSettings(data.settings);
+    if (data.settings !== undefined) {
+      const next = data.settings;
+      // GET settings does not report application receipts. Keep a saved preference's
+      // pending indication until an affirmative sync result clears it.
+      setSettings(prev => ({ ...next, catalogRefreshPending: prev?.catalogRefreshPending === true || next.catalogRefreshPending }));
+    }
     // Latest-wins: only seed from settings when no newer dedicated probe has committed
     // while this settings poll was in flight. Always merge against the live ref.
     if (
@@ -373,14 +378,15 @@ export function useDashboardData(apiBase: string) {
       startupHealthRef.current = merged;
       if (merged) writeSessionListCache(`${STARTUP_CACHE_PREFIX}${apiBase}`, merged);
     }
-    if (data.settings !== undefined) {
-      const prev = readSessionListCache<CachedControls>(controlsCacheKey(apiBase)) ?? {};
-      writeSessionListCache(controlsCacheKey(apiBase), {
-        ...prev,
-        settings: data.settings,
-      });
-    }
   }, [settingsPoll.data, apiBase]);
+
+  // Cache the merged UI state, including preference saves and successful applies.
+  // Raw GET settings cannot replace the local application receipt on a revisit.
+  useEffect(() => {
+    if (!settings) return;
+    const prev = readSessionListCache<CachedControls>(controlsCacheKey(apiBase)) ?? {};
+    writeSessionListCache(controlsCacheKey(apiBase), { ...prev, settings });
+  }, [settings, apiBase]);
 
   useEffect(() => {
     if (usagePoll.data !== undefined) {
@@ -607,29 +613,34 @@ export function useDashboardData(apiBase: string) {
     finally { setInjectionSaving(false); }
   };
 
-  const toggleCodexAutoStart = async () => {
-    if (!settings || settingsSaving) return;
-    const next = !settings.codexAutoStart;
+  const toggleCodexSetting = async (key: "codexAutoStart" | "codexDesktopAuthless") => {
+    if (!settings || settingsSaving || syncing) return;
+    const next = !(settings[key] ?? (key === "codexAutoStart"));
     setSettingsSaving(true);
     settingsMutationInFlightRef.current = true;
-    setSettings({ ...settings, codexAutoStart: next });
+    setSettings({ ...settings, [key]: next });
     try {
       const res = await fetch(`${apiBase}/api/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codexAutoStart: next }),
+        body: JSON.stringify({ [key]: next }),
       });
-      const data = await requireJson<{ codexAutoStart: boolean; startupHealth?: SettingsData["startupHealth"] }>(res, "save failed");
+      const data = await requireJson<SettingsData>(res, "save failed");
       settingsMutationEpochRef.current += 1;
-      setSettings(prev => prev ? { ...prev, codexAutoStart: data.codexAutoStart, startupHealth: data.startupHealth ?? prev.startupHealth } : prev);
+      // Saving the catalog preference is not proof that full Desktop sync applied it.
+      setSettings(prev => prev ? { ...prev, [key]: data[key], catalogRefreshPending: key === "codexDesktopAuthless" ? true : prev.catalogRefreshPending, startupHealth: data.startupHealth ?? prev.startupHealth } : prev);
+      if (key === "codexDesktopAuthless") await runSync();
     } catch {
-      setSettings(prev => prev ? { ...prev, codexAutoStart: !next } : prev);
+      setSettings(prev => prev ? { ...prev, [key]: !next } : prev);
       setError(true);
     } finally {
       settingsMutationInFlightRef.current = false;
       setSettingsSaving(false);
     }
   };
+
+  const toggleCodexAutoStart = () => toggleCodexSetting("codexAutoStart");
+  const toggleCodexDesktopAuthless = () => toggleCodexSetting("codexDesktopAuthless");
 
   // Clears the sync result/error in this hook. The dashboard toast owns its own dismissal
   // timer but must publish the dismissal here: syncResult/syncError live above the dashboard
@@ -649,6 +660,9 @@ export function useDashboardData(apiBase: string) {
       const res = await fetch(`${apiBase}/api/sync`, { method: "POST" });
       const data = await requireJson<SyncResult & { projectConfigGrouped?: ProjectCodexConfigGroup[] }>(res, "sync failed");
       setSyncResult(data);
+      if (data.ok && data.status === "applied") {
+        setSettings(prev => prev ? { ...prev, catalogRefreshPending: false } : prev);
+      }
       if (data.projectConfigGrouped) setProjectConfigWarnings(data.projectConfigGrouped);
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : String(err));
@@ -789,7 +803,7 @@ export function useDashboardData(apiBase: string) {
     effortCapHelpTriggerRef, updateTriggerRef, maHelpTriggerRef, shadowCallHelpTriggerRef,
     effortCapHelpDialogRef, updateDialogRef, maHelpDialogRef, shadowCallHelpDialogRef,
     filteredGroups, sidecarModels, visionModels,
-    saveSidecar, saveShadowCall, switchMaMode, toggleCodexAutoStart, runSync, clearSyncFeedback,
+    saveSidecar, saveShadowCall, switchMaMode, toggleCodexAutoStart, toggleCodexDesktopAuthless, runSync, clearSyncFeedback,
     fetchUpdateCheck, closeUpdateDialog, openUpdateDialog, changeUpdateChannel, runUpdate,
   };
 }
