@@ -650,14 +650,14 @@ test("a legacy cache keeps fallback disabled through GET failure, roster Save, a
 });
 
 test.each([false, true])("a captured old fallback GET cannot overwrite a newer draft or save (saved=%s)", async (saveNewer) => {
-  const committedA = { available, chosen: ["a-1"], fallback: ["a-2"], pollMs: 45_000 };
+  const committedA = { available, fallbackAvailable: available, chosen: ["a-1"], fallback: ["a-2"], pollMs: 45_000 };
   testWindow.sessionStorage.setItem(CACHE_KEY, JSON.stringify(committedA));
   // Serialize A before any edit or PUT. Reading mutable fallbackSettings after the gate
   // would accidentally return B and let the stale-response regression pass.
   const capturedOldResponse = Response.json({ models: ["a-2"], pollMs: 45_000, available });
   let releaseGet!: (response: Response) => void;
   pendingFallbackResponse = new Promise<Response>(resolve => { releaseGet = resolve; });
-  const committedB = { available, chosen: ["a-1"], fallback: ["a-3"], pollMs: 90_000 };
+  const committedB = { available, fallbackAvailable: available, chosen: ["a-1"], fallback: ["a-3"], pollMs: 90_000 };
 
   try {
     await mount();
