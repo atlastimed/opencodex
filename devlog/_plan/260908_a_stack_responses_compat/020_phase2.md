@@ -12,8 +12,10 @@ request without that header completes.
 
 ## MODIFY map
 
-`src/adapters/openai-responses.ts` — inside the canonical-forward block at
-2503-2513, before the existing routing-hint work.
+`src/adapters/openai-responses.ts` — inside the canonical-forward block, before
+the existing routing-hint work. Line numbers here are against the pinned base
+`942c02873` (block at 2503-2513); layer 1 adds two lines above it, so on this
+branch the block sits at 2505-2515.
 
 After:
 
@@ -30,11 +32,12 @@ After:
         applyCodexRoutingHint(routingHeaders, finalBody);
 ```
 
-`finalBody` is computed at 2494-2502 and serialized at 2523, so it is the actual
-wire model. `parsed.modelId` can differ; the existing test at 187-188 pins that
-distinction deliberately. Keying on `finalBody.model` therefore also covers aliases.
-The loop removes every case spelling, which matters because static provider headers
-merge in at 2315 and 2353 with arbitrary casing.
+`finalBody` is computed at 2494-2502 and serialized at 2523 on the pinned base
+(2496-2504 and 2525 on this branch), so it is the actual wire model.
+`parsed.modelId` can differ; the existing test at 187-188 pins that distinction
+deliberately. Keying on `finalBody.model` therefore also covers aliases. The loop
+removes every case spelling, which matters because static provider headers merge
+in at 2315 and 2353 on the pinned base (2317 and 2355 here) with arbitrary casing.
 
 ## Scope of the fix, and what it does not cover (audit finding 1)
 
@@ -68,4 +71,3 @@ serialized model is Spark; `gpt-5.6-sol` keeps the header. Existing guards at 18
 ## Verification (C)
 
 No local command. Verified by the single tip CI run in 050. Local suites: NOT RUN.
-
