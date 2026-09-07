@@ -2124,7 +2124,9 @@ export function stripOpenAiOnlyWebSearchFields(body: unknown): unknown {
  */
 const MUSE_SPARK_WEB_SEARCH_STRICT_MODELS = new Set([
   "muse-spark-1.3-contributor",
+  "muse-spark-1.3-contributor-free",
   "muse-spark-1.2-contributor",
+  "muse-spark-1.2-contributor-free",
 ]);
 
 const MUSE_SPARK_WEB_SEARCH_STRICT_RESPONSE_URLS = new Set([
