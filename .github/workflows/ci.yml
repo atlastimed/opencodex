@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-          ref: 8223788bdce6c88efbbd93a65cb0576bb3cd01e5
+          ref: ce71d917143ddcbd5675b6ba92d8b1053971cd25
           path: candidate
       - name: Setup pinned Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -41,4 +41,4 @@ jobs:
           bun install --frozen-lockfile
       - name: Prove timezone isolation and negative controls
         shell: bash
-        run: python evidence/scripts/c248-timezone-proof.py candidate 8223788bdce6c88efbbd93a65cb0576bb3cd01e5
+        run: python evidence/scripts/c248-timezone-proof.py candidate ce71d917143ddcbd5675b6ba92d8b1053971cd25
