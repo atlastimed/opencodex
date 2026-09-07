@@ -174,6 +174,31 @@ describe("#2617/#3378 Muse Spark web_search compatibility", () => {
     }
   });
 
+  test("a nested additional_tools declaration is sanitized for the Free tiers too", () => {
+    for (const modelId of ["muse-spark-1.2-contributor-free", "muse-spark-1.3-contributor-free"]) {
+      const body = build(modelId, {
+        input: [{ type: "additional_tools", tools: [webSearchTool()] }],
+      });
+      const item = (body.input as Array<Record<string, unknown>>)[0]!;
+      const nested = (item.tools as Array<Record<string, unknown>>)[0]!;
+      expect(nested.type).toBe("web_search");
+      expect(Object.hasOwn(nested, "search_content_types")).toBe(false);
+      expect(Object.hasOwn(nested, "indexed_web_access")).toBe(false);
+    }
+  });
+
+  test("the Free tiers keep the field on web_search_preview, where the gateway accepts it", () => {
+    for (const modelId of ["muse-spark-1.2-contributor-free", "muse-spark-1.3-contributor-free"]) {
+      const body = build(modelId, {
+        tools: [{ ...webSearchTool(), type: "web_search_preview" }],
+      });
+      const tool = toolsOf(body)[0]!;
+      expect(tool.type).toBe("web_search_preview");
+      expect(tool.search_content_types).toEqual(["text", "image"]);
+      expect(tool.indexed_web_access).toBe(true);
+    }
+  });
+
   test("OpenCode Go applies the same Muse compatibility guard", () => {
     const body = buildForProvider(ZEN_GO_PROVIDER, "muse-spark-1.3-contributor", {
       tools: [webSearchTool()],
