@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
+import { resolve } from "node:path";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import { LanguageProvider } from "../src/i18n/provider";
@@ -154,7 +155,7 @@ for (const connected of [false, true]) {
 }
 
 test("America/Santiago midnight DST retains final-day activity and tooltip", async () => {
-  if (process.env.TZ !== "America/Santiago") {
+  if (process.env.OCX_USAGE_SANTIAGO_CHILD !== "1" && process.env.TZ !== "America/Santiago") {
     // Restoring an absent TZ can change Bun's effective timezone on Windows.
     // Start the DST case in its timezone without mutating this suite's clock.
     const timezone = { present: Object.hasOwn(process.env, "TZ"), value: process.env.TZ };
@@ -164,17 +165,20 @@ test("America/Santiago midnight DST retains final-day activity and tooltip", asy
       "-t", "^America/Santiago midnight DST retains final-day activity and tooltip$",
       "--timeout", "10000",
     ], {
-      env: { ...process.env, TZ: "America/Santiago" },
+      cwd: resolve(import.meta.dir, ".."),
+      env: { ...process.env, TZ: "America/Santiago", OCX_USAGE_SANTIAGO_CHILD: "1" },
       stdout: "pipe", stderr: "pipe", timeout: 12000, killSignal: "SIGKILL",
     });
     const diagnostics = `${child.stdout.toString()}\n${child.stderr.toString()}`;
     expect(child.exitedDueToTimeout, diagnostics).not.toBe(true);
     expect(child.signalCode, diagnostics).toBeUndefined();
     expect(child.exitCode, diagnostics).toBe(0);
+    expect(child.stdout.toString().split(/\r?\n/), diagnostics).toContain("OCX_SANTIAGO_CASE_COMPLETED");
     expect({ present: Object.hasOwn(process.env, "TZ"), value: process.env.TZ }).toEqual(timezone);
     expect(new Date(2020, 8, 15, 10, 20).getTime()).toBe(localTime);
     return;
   }
+  expect(process.env.TZ).toBe("America/Santiago");
   expect(new Date(2026, 8, 6, 0).getHours()).toBe(1);
   await mount();
   await respond(0, "preset-marker");
@@ -192,7 +196,8 @@ test("America/Santiago midnight DST retains final-day activity and tooltip", asy
   await act(async () => active!.dispatchEvent(new testWindow.MouseEvent("mouseover", { bubbles: true })));
   expect(container.querySelector(".heatmap-tip-date")?.textContent).toBe("2026-09-07");
   expect(container.querySelector(".heatmap-tip")?.textContent).toContain("700");
-}, 15000);
+  if (process.env.OCX_USAGE_SANTIAGO_CHILD === "1") console.log("OCX_SANTIAGO_CASE_COMPLETED");
+}, process.env.OCX_USAGE_SANTIAGO_CHILD === "1" ? 10000 : 15000);
 
 test("Apply submits inclusive bounds once; Clear restores the held preset without custom cache entries", async () => {
   await mount();
