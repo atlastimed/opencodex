@@ -814,4 +814,211 @@ export default function Models({ apiBase, restartEpoch = 0 }: { apiBase: string;
         return;
       }
       // Compare VALUES, not text. Retyping 64000 as "64,000" is not a change.
-      if (parsed === (contextSnapshot.modelContextWindows
+      if (parsed === (contextSnapshot.modelContextWindows[modelId] ?? null)) continue;
+      modelWindows[modelId] = parsed;
+    }
+    const defaultChanged = contextDefaultTouched
+      && providerWindow !== contextSnapshot.contextWindow;
+
+    // Nothing survived the comparison: every edit was reverted before Apply. Writing an
+    // unchanged payload would still stamp over concurrent edits.
+    if (!defaultChanged && Object.keys(modelWindows).length === 0) {
+      setContextModalProvider(null);
+      // Not "updated" — nothing was. Saying otherwise would be a small lie the user could
+      // act on, e.g. believing a value they typed and reverted had been written.
+      publishFeedback(true, t("models.contextUnchanged"));
+      return;
+    }
+
+    setContextSaving(true);
+    setContextError("");
+    try {
+      const body: Record<string, unknown> = {};
+      if (defaultChanged) body.contextWindow = providerWindow;
+      if (Object.keys(modelWindows).length > 0) body.modelContextWindows = modelWindows;
+      const response = await fetch(
+        `${apiBase}/api/providers?name=${encodeURIComponent(contextModalProvider)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      await readJsonOrThrow(response, t("models.contextSaveFailed"));
+    } catch (error) {
+      setContextError(error instanceof Error ? error.message : t("models.contextSaveFailed"));
+      return;
+    } finally {
+      setContextSaving(false);
+    }
+
+    // Past the write boundary: the values ARE saved. A refresh that fails afterwards is a
+    // display problem, and reporting it through `contextError` would set an error on a modal
+    // that is already closed — invisible to the user, and it contradicts the success they just
+    // saw. Let the ordinary load error surface handle it.
+    setContextModalProvider(null);
+    publishFeedback(true, t("models.contextSaved"));
+    await load(true);
+  };
+
+  // One-shot default collapse. It stays an effect on `groups` so CACHED groups collapse
+  // immediately on first paint, even when revalidation is slow or fails; moving it into
+  // the load() success path would render cached providers expanded and leave them
+  // expanded whenever the refresh errors.
+  useEffect(() => {
+    if (!needsDefaultCollapseRef.current) return;
+    if (groups.length === 0) return;
+    needsDefaultCollapseRef.current = false;
+    const all = new Set(groups.map(group => group.provider));
+    // eslint-disable-next-line react-hooks/set-state-in-effect, react/react-compiler
+    setCollapsed(all);
+    writeCollapsedProviders(all);
+  }, [groups]);
+
+  const effectiveVisibleCount = useMemo(() => {
+    if (!selectedModels) return 0;
+    return models.filter(model => modelVisible(
+      selectedModels,
+      model.provider,
+      model.id,
+      model.native === true,
+      disabled.has(model.namespaced),
+    )).length;
+  }, [disabled, models, selectedModels]);
+
+  /*
+   * Quiet per-tab counts. A count is omitted, never zeroed, while it is unknown: the
+   * panels report theirs up once mounted, and a tab that has never been opened has
+   * nothing truthful to say.
+   */
+  const tabMeta = useMemo(() => ({
+    catalog: catalogCountReady
+      ? t("models.active", { active: effectiveVisibleCount, total: models.length })
+      : undefined,
+    combos: comboCount === null ? undefined : String(comboCount),
+    routing: routingCount === null ? undefined : String(routingCount),
+    compatibility: compatibilityCount === null ? undefined : String(compatibilityCount),
+  }), [catalogCountReady, comboCount, compatibilityCount, effectiveVisibleCount, models.length, routingCount, t]);
+
+  const applyVisibility = async (
+    scope: ModelVisibilityScope,
+    provider: string,
+    targets: ModelVisibilityTarget[],
+    enabled: boolean,
+  ) => {
+    if (catalogMutationRef.current) return;
+    catalogMutationRef.current = true;
+    ++loadGenerationRef.current;
+    setBusy(true);
+    busyRef.current = true;
+    setStatus("");
+    let errorKey: "models.saveFailed" | "models.networkError" | null = null;
+    try {
+      const response = await putModelVisibility(apiBase, scope, provider, targets, enabled);
+      if (!response.ok) errorKey = "models.saveFailed";
+      else {
+        const failures = clientCatalogRefreshFailures(await response.json());
+        if (failures !== undefined) setIntegrationFailures(failures);
+      }
+    } catch {
+      errorKey = "models.networkError";
+    } finally {
+      const refreshed = await load(true);
+      if (errorKey) {
+        setOk(false);
+        setStatus(t(errorKey));
+      } else if (refreshed) {
+        setOk(true);
+        setStatus(t("models.applied"));
+      }
+      setBusy(false);
+      busyRef.current = false;
+      catalogMutationRef.current = false;
+    }
+  };
+
+  const toggleProviderCap = async (provider: string) => {
+    setBusy(true);
+    busyRef.current = true;
+    setStatus("");
+    // Send the desired next state, not the current one: clicking the switch turns a
+    // currently-unset cap on (enabled: true) and a currently-set cap off (enabled: false).
+    const enabled = contextCaps[provider] === undefined;
+    try {
+      const r = await fetch(`${apiBase}/api/provider-context-caps`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, enabled }),
+      });
+      try {
+        const data = await readJsonOrThrow<ProviderContextCapsResponse>(r, t("models.capSaveFailed"));
+        setContextCaps(data?.caps ?? {});
+        setContextCapValues(data?.values ?? data?.caps ?? {});
+        setOk(true);
+        setStatus(t("models.capApplied"));
+        await load(true);
+      } catch (e) {
+        setOk(false);
+        setStatus(e instanceof Error ? e.message : t("models.capSaveFailed"));
+      }
+    } catch {
+      setOk(false); setStatus(t("models.networkError"));
+    } finally {
+      setBusy(false);
+      busyRef.current = false;
+    }
+  };
+  const toggleCollapse = (p: string) => {
+    setCollapsed(prev => {
+      const n = new Set(prev);
+      if (n.has(p)) n.delete(p); else n.add(p);
+      writeCollapsedProviders(n);
+      return n;
+    });
+  };
+  const setAllCollapsed = (collapse: boolean) => {
+    setCollapsed(() => {
+      const n = collapse ? new Set(groups.map(group => group.provider)) : new Set<string>();
+      writeCollapsedProviders(n);
+      return n;
+    });
+  };
+
+  const putCap = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    busyRef.current = true;
+    setStatus("");
+    try {
+      const r = await fetch(`${apiBase}/api/provider-context-caps`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      try {
+        const data = await readJsonOrThrow<ProviderContextCapsResponse>(r, t("models.capSaveFailed"));
+        if (typeof data?.value === "number" && Number.isFinite(data.value) && data.value > 0) setContextCapValue(data.value);
+        setContextCaps(data?.caps ?? {});
+        setContextCapValues(data?.values ?? data?.caps ?? {});
+        setOk(true);
+        setStatus(t("models.capApplied"));
+        await load(true);
+      } catch (e) {
+        setOk(false);
+        setStatus(e instanceof Error ? e.message : t("models.capSaveFailed"));
+      }
+    } catch {
+      setOk(false); setStatus(t("models.networkError"));
+    } finally {
+      setBusy(false);
+      busyRef.current = false;
+    }
+  };
+
+  const allCapped = useMemo(
+    () => {
+      // Cap aggregate counts routed providers only; the single native group has no cap
+      // switch. Zero-row routed providers are included: they can still hold a per-provider
+      // cap (e.g. a custom model added later), and excluding them would let "set all"
+      // silently overwrite that cap when the global value changes. Saved caps of providers
+      // that are no longer in `groups` (e.g. disabled after receiving a custom cap) are
+      // also counted: the management API rewr
