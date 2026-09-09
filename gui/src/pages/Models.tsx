@@ -189,4 +189,154 @@ export default function Models({ apiBase, restartEpoch = 0 }: { apiBase: string;
     appServerReadBase.current = apiBase;
     setAppServerState(null);
     void reloadAppServerState();
-    return cancelAppServ
+    return cancelAppServerRead;
+  }, [apiBase, cancelAppServerRead, reloadAppServerState, restartEpoch]);
+
+
+
+  /*
+   * Tab state. The hash is the source of truth, so refresh, bookmark, and
+   * Back/Forward keep the choice — same contract as `#logs` / `#logs/debug`.
+   *
+   * Panels mount lazily and then STAY mounted, hidden, so a half-typed combo draft
+   * survives a tab hop. The mounted set accumulates in the handler rather than an
+   * effect: an effect would cost a second render pass on every switch for a value both
+   * callers already know.
+   */
+  const [tab, setTab] = useState<ModelsTab>(readModelsTab);
+  const [mounted, setMounted] = useState<ReadonlySet<ModelsTab>>(() => new Set([readModelsTab()]));
+
+  const activateTab = useCallback((next: ModelsTab) => {
+    setTab(next);
+    setMounted(current => (current.has(next) ? current : new Set([...current, next])));
+  }, []);
+
+  useEffect(() => {
+    const syncFromHash = () => activateTab(readModelsTab());
+    window.addEventListener("hashchange", syncFromHash);
+    window.addEventListener("popstate", syncFromHash);
+    return () => {
+      window.removeEventListener("hashchange", syncFromHash);
+      window.removeEventListener("popstate", syncFromHash);
+    };
+  }, [activateTab]);
+
+  const selectTab = useCallback((next: ModelsTab) => {
+    // Deliberate navigation: push a history entry so Back/Forward restore the tab.
+    selectModelsTab(next);
+    activateTab(next);
+  }, [activateTab]);
+
+  const catalogActive = tab === "catalog";
+
+  /** Counts reported up by the panels that own the underlying lists. */
+  const [comboCount, setComboCount] = useState<number | null>(null);
+  const [routingCount, setRoutingCount] = useState<number | null>(null);
+  const [compatibilityCount, setCompatibilityCount] = useState<number | null>(null);
+
+  const t: TFn = useT();
+  const cacheKey = `ocx.models.catalog.v1:${apiBase}`;
+  const cached = useMemo(() => readSessionListCache<CachedModelsPage>(cacheKey), [cacheKey]);
+  const [models, setModels] = useState<ModelRow[]>(() => cached?.models ?? []);
+  const [providers, setProviders] = useState<ConfiguredProviderSummary[]>(() => cached?.providers ?? []);
+  const [disabled, setDisabled] = useState<Set<string>>(() => new Set(cached?.disabled ?? []));
+  const [selectedModels, setSelectedModels] = useState<ProviderModelMap | null>(() => cached?.selectedModels ?? null);
+  const [search, setSearch] = useState<Record<string, string>>({});
+  const [limit, setLimit] = useState<Record<string, number>>({});
+  const [contextCaps, setContextCaps] = useState<Record<string, number>>(() => cached?.contextCaps ?? {});
+  const [contextCapValues, setContextCapValues] = useState<Record<string, number>>(() => cached?.contextCapValues ?? {});
+  const [contextCapValue, setContextCapValue] = useState(() => cached?.contextCapValue ?? 350_000);
+  const pickerCacheKey = `${cacheKey}:picker-order`;
+  const cachedPicker = useMemo(() => {
+    const value = readSessionListCache<unknown>(pickerCacheKey);
+    return isPickerOrderSettings(value) ? value : undefined;
+  }, [pickerCacheKey]);
+  const [pickerDraft, setPickerDraft] = useState<ModelPickerOrderMode | null>(null);
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const pickerFlight = useRef<BoundedFetch | null>(null);
+  const pickerGeneration = useRef(0);
+  const pickerResource = useDataSurface<PickerOrderSettings>(
+    pickerCacheKey, [apiBase],
+    useCallback(async (signal: AbortSignal) => {
+      const response = await fetch(`${apiBase}/api/subagent-models`, { signal });
+      const data = await readJsonOrThrow<unknown>(response);
+      if (!isPickerOrderSettings(data)) throw new Error("picker settings payload missing");
+      if (signal.aborted) throw new Error("picker settings request aborted");
+      writeSessionListCache(pickerCacheKey, data);
+      return data;
+    }, [apiBase, pickerCacheKey]),
+    { isEmpty: () => false, enabled: catalogActive, deadlineMs: 15_000, initialData: cachedPicker },
+  );
+  const pickerSettings = pickerResource.state.data;
+  const pickerMode = pickerDraft ?? modelPickerOrderMode(
+    pickerSettings?.pickerAvailable ?? [], pickerSettings?.pickerOrder ?? [], pickerSettings?.pickerOrderMode,
+  );
+  useLayoutEffect(() => {
+    pickerGeneration.current++;
+    setPickerDraft(null);
+    setPickerBusy(false);
+    return () => {
+      pickerGeneration.current++;
+      pickerFlight.current?.controller.abort();
+      pickerFlight.current?.clear();
+      pickerFlight.current = null;
+      cancelAppServerRead();
+    };
+  }, [apiBase, catalogActive, cancelAppServerRead]);
+  useLayoutEffect(() => {
+    // Pin inferred Custom before any late GET can switch mode and unmount its draft.
+    if (catalogActive && pickerDraft === null && pickerMode === "custom") setPickerDraft("custom");
+  }, [catalogActive, pickerDraft, pickerMode]);
+  const [customCap, setCustomCap] = useState("");
+  const [showCustom, setShowCustom] = useState(false);
+  const [providerCapCustomOpen, setProviderCapCustomOpen] = useState<Record<string, boolean>>({});
+  const [providerCapCustomDraft, setProviderCapCustomDraft] = useState<Record<string, string>>({});
+  const initialCollapsed = readCollapsedProviders();
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => initialCollapsed ?? new Set());
+  const needsDefaultCollapseRef = useRef(initialCollapsed === null);
+  const [status, setStatus] = useState("");
+  const [integrationFailures, setIntegrationFailures] = useState<ClientCatalogRefreshFailure[]>([]);
+  const [ok, setOk] = useState(false);
+  // Feedback generation: a repeated identical message (same success string, same validation
+  // error) must still re-arm the toast timer. Clearing `status` alone is not enough — a
+  // second identical value bails out of React's state diff, so the old timer would dismiss
+  // the new toast early. Every publish bumps the generation.
+  const [feedbackGen, setFeedbackGen] = useState(0);
+  const publishFeedback = useCallback((nextOk: boolean, message: string) => {
+    setOk(nextOk);
+    setStatus(message);
+    setFeedbackGen(g => g + 1);
+  }, []);
+  // Transient action feedback as a fixed toast: appearing or auto-clearing it never shifts
+  // the workspace below (the old inline Notice pushed the whole model grid down by its
+  // height on every apply). The timer itself just clears the status again.
+  useEffect(() => {
+    if (!status) return;
+    const holdMs = ok ? 6000 : 8000;
+    const timer = setTimeout(() => setStatus(""), holdMs);
+    return () => clearTimeout(timer);
+  }, [status, ok, feedbackGen]);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const catalogMutationRef = useRef(false);
+  const loadGenerationRef = useRef(0);
+  const loadPendingRef = useRef(false);
+  // multi_agent_v2 / ultra gate. null = endpoint unavailable (older proxy build) -> section hidden.
+  const [v2, setV2] = useState<V2Status | null>(null);
+  // #2465: per-provider model-preset state. Keyed by provider so one card's busy state cannot
+  // freeze the others.
+  const [presets, setPresets] = useState<Record<string, ModelPresetView>>({});
+  const [modelDiscovery, setModelDiscovery] = useState<ModelDiscoveryView | null>(null);
+  const [aliases, setAliases] = useState<AliasView>({ providers: {}, models: {}, defaults: { global: false, providers: {} } });
+  const [showAliases, setShowAliases] = useState(false);
+  const [presetBusy, setPresetBusy] = useState<string | null>(null);
+  const [v2Loading, setV2Loading] = useState(true);
+  const [v2Busy, setV2Busy] = useState(false);
+  const [v2Note, setV2Note] = useState("");
+  const v2BusyRef = useRef(false);
+  const [threadsCustom, setThreadsCustom] = useState("");
+  const [showThreadsCustom, setShowThreadsCustom] = useState(false);
+  const [v2HelpOpen, setV2HelpOpen] = useState(false);
+  const [customModalOpen, setCustomModalOpen] = useState(false);
+  const [displayNameModel, setDisplayNameModel] = useState<ModelRow | null>(null);
+  const [priceModel, setPriceModel] = us
