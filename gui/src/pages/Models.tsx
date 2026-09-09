@@ -481,4 +481,177 @@ export default function Models({ apiBase, restartEpoch = 0 }: { apiBase: string;
         enabled: data.enabled,
         agentsMaxThreadsConflict: data.agentsMaxThreadsConflict === true,
         maxConcurrentThreadsPerSession: typeof data.maxConcurrentThreadsPerSession === "number" ? data.maxConcurrentThreadsPerSession : null,
-        multiAgentMode: data
+        multiAgentMode: data.multiAgentMode === "v1" || data.multiAgentMode === "v2" ? data.multiAgentMode : "default",
+        keepNativeChatGptOnV1: data.keepNativeChatGptOnV1 === true,
+      });
+    } catch {
+      setV2(null); // old server / network: hide the section instead of guessing
+    } finally {
+      bounded.clear();
+      setV2Loading(false);
+    }
+  }, [apiBase]);
+
+  const fetchCatalog = useCallback(async (signal: AbortSignal): Promise<CachedModelsPage> => {
+    const [modelsRes, capsRes, providersRes, selectionData] = await Promise.all([
+      // Every request carries the resource signal, so leaving the catalog tab cancels
+      // the work rather than only discarding its result.
+      fetch(`${apiBase}/api/models`, { signal }),
+      fetch(`${apiBase}/api/provider-context-caps`, { signal }),
+      fetch(`${apiBase}/api/providers`, { signal }),
+      fetchSelectedModels(apiBase, fetch, signal),
+    ]);
+    const [data, capsData, providerData] = await Promise.all([
+      readJsonOrThrow<ModelRow[]>(modelsRes),
+      readJsonOrThrow<ProviderContextCapsResponse>(capsRes),
+      readJsonOrThrow<ConfiguredProviderSummary[]>(providersRes),
+    ]);
+    if (data === undefined || capsData === undefined || providerData === undefined) {
+      throw new Error("models payload missing");
+    }
+    if (signal.aborted) throw new Error("models request aborted");
+    const nextDisabled = collectDisabledNamespaced(data);
+    const value = typeof capsData.value === "number" && Number.isFinite(capsData.value) && capsData.value > 0
+      ? capsData.value
+      : (typeof capsData.cap === "number" && Number.isFinite(capsData.cap) && capsData.cap > 0 ? capsData.cap : undefined);
+    const nextCapValue = value !== undefined ? value : 350_000;
+    const next = {
+      models: data,
+      providers: providerData,
+      selectedModels: selectionData,
+      disabled: [...nextDisabled],
+      contextCaps: capsData.caps ?? {},
+      contextCapValues: capsData.values ?? capsData.caps ?? {},
+      contextCapValue: nextCapValue,
+    } satisfies CachedModelsPage;
+    writeSessionListCache(cacheKey, next);
+    return next;
+  }, [apiBase, cacheKey]);
+
+  const applyCatalog = useCallback((next: CachedModelsPage) => {
+    const nextGroups = buildProviderModelGroups(next.models, next.providers);
+    setSelectedProvider(prev => (
+      prev !== null && !nextGroups.some(group => group.provider === prev)
+        ? null
+        : prev
+    ));
+    setModels(next.models);
+    setProviders(next.providers);
+    setDisabled(new Set(next.disabled));
+    setSelectedModels(next.selectedModels);
+    setContextCapValue(next.contextCapValue);
+    setContextCaps(next.contextCaps);
+    setContextCapValues(next.contextCapValues ?? next.contextCaps);
+  }, []);
+
+  const catalogResource = useDataSurface<CachedModelsPage>(
+    cacheKey,
+    [apiBase],
+    async (signal) => {
+      const next = await fetchCatalog(signal);
+      // A manual mutation refresh may have invalidated this request while its JSON was decoding.
+      // Do not let the aborted catalog repaint controls after the newer result is applied.
+      if (signal.aborted) throw new Error("models request aborted");
+      applyCatalog(next);
+      return next;
+    },
+    // Gated on the catalog tab: a 10-second poll that keeps running while the user
+    // reads Combos or Routing is exactly the hidden work this workspace avoids.
+    // Live model discovery is slow; the catalog gets a raised deadline so a slow
+    // response is never misread as a hung one.
+    { isEmpty: () => false, pollMs: 10_000, initialData: cached ?? undefined, enabled: catalogActive, deadlineMs: 60_000 },
+  );
+  const catalogState = catalogResource.state;
+
+  const load = useCallback(async (force = false, signal?: AbortSignal): Promise<boolean> => {
+    if (loadPendingRef.current && !force) return false;
+    loadPendingRef.current = true;
+    const generation = ++loadGenerationRef.current;
+    try {
+      const next = await fetchCatalog(signal ?? new AbortController().signal);
+      if (!shouldApplyLoadGeneration(generation, loadGenerationRef.current)) return false;
+      applyCatalog(next);
+      // Follow-up mutation refreshes retain their existing awaitable contract while publishing
+      // the result through the same shared store used by the initial catalog subscription.
+      setClientResourceData(cacheKey, next);
+      pickerResource.refresh();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (shouldApplyLoadGeneration(generation, loadGenerationRef.current)) {
+        loadPendingRef.current = false;
+      }
+    }
+  }, [applyCatalog, cacheKey, fetchCatalog, pickerResource.refresh]);
+
+  const finishDisplayNameEdit = useCallback(() => {
+    const trigger = displayNameTriggerRef.current;
+    setDisplayNameModel(null);
+    setDisplayNameRequestError(null);
+    setDisplayNameRecovery(null);
+    setDisplayNameCurrentPending(false);
+    window.setTimeout(() => {
+      if (trigger?.isConnected) trigger.focus();
+    }, 0);
+  }, []);
+
+  const closeDisplayNameEdit = useCallback(() => {
+    if (!displayNameSavingRef.current) finishDisplayNameEdit();
+  }, [finishDisplayNameEdit]);
+
+  // undefined retries only the read after a confirmed write or an unknown outcome.
+  const saveDisplayName = useCallback(async (displayName: string | null | undefined) => {
+    const model = displayNameModel;
+    if (!model || displayNameSavingRef.current) return;
+    const bounded = createBoundedFetch(60_000);
+    displayNameRequestRef.current = bounded;
+    displayNameSavingRef.current = true;
+    setDisplayNameSaving(true);
+    setDisplayNameRequestError(null);
+    // A failed convergence retry cannot invalidate an earlier persistence receipt
+    // for the same value. Editing the draft clears recovery and starts a new intent.
+    let confirmed = displayNameRecovery?.confirmed === true
+      && (displayName === undefined || displayName === displayNameRecovery.value);
+    let receivedReceipt = displayName === undefined;
+    let refreshOnly = displayName === undefined;
+    try {
+      if (displayName !== undefined) {
+        const response = await fetch(
+          `${apiBase}/api/providers/${encodeURIComponent(model.provider)}/model-display-names`,
+          {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ modelId: model.id, displayName }),
+            signal: bounded.signal,
+          },
+        );
+        // The route can persist the value and return 503 when catalog convergence fails.
+        // Keep that receipt instead of throwing away saved:true with the error body.
+        type DisplayNameReceipt = {
+          saved?: boolean;
+          error?: string;
+          displayName?: string;
+          displayNameOverride?: string | null;
+          displayNameSource?: ModelRow["displayNameSource"];
+        };
+        const result: DisplayNameReceipt | undefined = response.ok
+          ? await readJsonOrThrow<DisplayNameReceipt>(response, t("models.displayNameSaveFailed"))
+          : await response.json();
+        bounded.signal.throwIfAborted();
+        if (!result || typeof result !== "object" || Array.isArray(result)
+          || (!response.ok && result.saved !== true && typeof result.error !== "string")) {
+          throw new Error(t("models.displayNameSaveFailed"));
+        }
+        receivedReceipt = true;
+        const receiptConfirmed = response.ok || result.saved === true;
+        confirmed = confirmed || receiptConfirmed;
+        if (receiptConfirmed) {
+          const override = result.displayNameOverride === null ? undefined
+            : result.displayNameOverride ?? displayName ?? undefined;
+          const fields: Pick<ModelRow, "displayName" | "displayNameOverride" | "displayNameSource"> = {
+            displayName: result.displayName ?? override,
+            displayNameOverride: override,
+            displayNameSource: result.displayNameSource ?? (override ? "operator" : undefined),
+          };
+      
