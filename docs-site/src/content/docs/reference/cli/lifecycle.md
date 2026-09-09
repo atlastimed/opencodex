@@ -44,6 +44,13 @@ native Codex is restored, leaving your client config pointed at a proxy that is 
 dashboard returns `self_unload_service`, changes nothing, and asks you to run `ocx stop` —
 which stops the service from outside and completes the restore.
 
+A proxy exit alone does not confirm that shared Codex/Grok restoration succeeded. If the stop
+response reports failure, is unreadable, or does not confirm the assigned teardown mode, the CLI
+keeps restoration with the stopping parent after the existing ownership and respawn checks.
+It does not enter the forced-stop fallback for a process already observed to have exited. A
+receipt-backed deferral still leaves final restoration and receipt cleanup with the parent;
+failure to restore shared client configuration keeps the stop failed and its receipt outstanding.
+
 ### `ocx restart`
 
 When a proxy is running, ask that exact attested PID and port to restart in place, wait for its
