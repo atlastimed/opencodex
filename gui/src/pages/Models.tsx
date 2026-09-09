@@ -29,4 +29,74 @@ import Combos from "./Combos";
 import RoutingProfiles from "./RoutingProfiles";
 import CompatibilityMatrix from "./CompatibilityMatrix";
 import { ModelsTabStrip } from "./models-tab-strip";
-imp
+import {
+  modelsPanelDomId,
+  modelsTabDomId,
+  readModelsTab,
+  selectModelsTab,
+  type ModelsTab,
+} from "./models-tab";
+import {
+  buildProviderModelGroups,
+  type ConfiguredProviderSummary,
+  type ProviderModelGroup,
+} from "../models-groups";
+import {
+  fetchSelectedModels,
+  modelVisible,
+  putModelVisibility,
+  clientCatalogRefreshFailures,
+  type ClientCatalogRefreshFailure,
+  shouldApplyLoadGeneration,
+  type ProviderModelMap,
+  type ModelVisibilityScope,
+  type ModelVisibilityTarget,
+} from "../model-visibility";
+import {
+  activeModelOptions,
+  CAP_OPTION_SET,
+  CAP_OPTIONS,
+  collectDisabledNamespaced,
+  CUSTOM_OPTION,
+  fmtK,
+  NATIVE_CAP_OPTIONS,
+  NATIVE_CAP_OPTION_SET,
+  PAGE,
+  readCollapsedProviders,
+  THREAD_OPTION_SET,
+  THREAD_OPTIONS,
+  writeCollapsedProviders,
+  discoveryFailureLabel,
+  REASONING_EFFORT_LEVELS,
+  type ModelRow,
+  type ProviderContextCapsResponse,
+  type ShadowCallData,
+  type V2Status,
+} from "./models-shared";
+import { DiscoveryFailedHint, EmptyProviderHint } from "./models-provider-hints";
+import { shadowCallModelOptions } from "./dashboard-shared";
+import { shadowSourceModelBadge, shadowSourceModelLabel } from "./shadow-call-source";
+
+type CachedModelsPage = {
+  models: ModelRow[];
+  providers: ConfiguredProviderSummary[];
+  selectedModels: ProviderModelMap;
+  disabled: string[];
+  contextCaps: Record<string, number>;
+  contextCapValues?: Record<string, number>;
+  contextCapValue: number;
+};
+
+/** One subtitle per tab: only one panel is visible, so only one description applies. */
+const SUBTITLE_TKEY: Record<ModelsTab, TKey> = {
+  catalog: "models.subtitle",
+  combos: "models.subtitle.combos",
+  routing: "models.subtitle.routing",
+  compatibility: "models.subtitle.compatibility",
+};
+
+/**
+ * Parse a context-window field: a number, `null` for "unset", or `undefined` when the text is
+ * not usable. Separators are cosmetic, so "64,000" and "64_000" and "64000" are one value.
+ *
+ * Safe-integer rather than integer: `Number.isIntege
