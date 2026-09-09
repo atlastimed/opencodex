@@ -39,14 +39,14 @@ GUI session 簽發到服務的頁面中，並在到期或代理重啟時靜默�
 | **Sub-agent delegation** | 為 v1 委派 prompt 選擇原生或路由模型，並可指定 reasoning 強度。它不是逐次生成的路由器，詳見下文。 |
 | **Sidecar** | 選擇 web-search 模型及強度，以及圖像描述模型；更改從下一次請求開始生效。 |
 | **Maintenance** | 重新同步 Codex 模型目錄，檢視專案級設定繞過警告，檢查 latest/preview 版本，並可在更新後重啟代理。 |
-| **啟動安全** | 顯示注入的 Codex 路由能否在重啟後繼續工作，並分別顯示服務、launcher shim 狀態和準確的修復命令。 |
+| **啟動安全** | 顯示注入的 Codex 路由能否在重啟後繼續工作，並紛別顯示服務、launcher shim 狀態和準確的修復命令。 |
 | **Windows 托盤** | 安裝使用者登入托盤，一鍵控制代理啟動、停止、重啟、面板和狀態。托盤不是代理重啟服務。 |
 | **Codex 自動啟動** | 允許已安裝的 Codex launcher shim 執行 `ocx ensure`。此開關不會安裝 shim 或後臺服務。 |
 | **Providers** | 新增、編輯、啟用/停用、刪除 provider，並在支援時管理 OAuth 帳號池和 API key 池。 |
 | **Add provider** | 搜尋 registry preset，選擇帳號登入、API key 服務、本機伺服器或自訂 endpoint。 |
-| **Codex Auth** | 新增 ChatGPT/Codex 池帳號，選擇下一 session 的帳號，重新整理 5h / 每週 / 30d 配額，啟用或停用配額自動切換，設定其 1–100% 閾值和臨時故障 failover。 |
+| **Codex Auth** | 新增 ChatGPT/Codex 池帳號，選擇下一 session 的帳號，重新整理 5h / 每週 / 30d 配額，啟用或停用配額自動切換，設定其 1–100% 闡值和臨時故障 failover。 |
 | **Subagents** | 在 `spawn_agent` override 列表中置頂最多五個原生或路由模型。 |
-| **Models** | 開關原生 GPT 與路由模型，設定 provider allowlist、上下文上限、v1/base/v2 以及 v2 thread 數量。 |
+| **Models** | 開關原生 GPT 與路由模型，設定 provider allowlist、上下文上限、v1/base/v2 以及 v2 thread 數量。即時發現已啟用且目錄擷取失敗時，已設定與自訂模型仍會列出；分組會顯示失敗原因，並提供指向供應商設定（`#providers`）的連結，其中包含「從供應商發現模型」。 |
 | **Logs** | 自動重新整理近期請求，顯示 token、請求強度、實際模型、provider、狀態、request id、耗時和錯誤詳情。 |
 | **Usage / Debug** | 檢視 token usage 覆蓋率與趨勢，或啟用可選的 provider transport 和 usage 提取診斷。 |
 | **Stop** | 優雅地停止代理和已安裝的後臺服務，恢復原生 Codex 並退出（`POST /api/stop`）。在使用工作排程器後端的 Windows 上，儀表板會拒絕並提示改用 `ocx stop`：工作結束後包裝程序仍可能重新啟動 Proxy，只有執行在 Proxy 之外的 stop 才能在還原用戶端設定前確認這個重啟視窗。被拒絕時不會做任何變更。 |
@@ -110,7 +110,7 @@ Dashboard 的 **Sub-agent delegation** 選擇器會儲存 `injectionModel`，以
 - 手動選擇帳號會影響下一次新建的 Codex session；已經繫結帳號的 thread 不會因為這次手動切換而
   在中途轉移。
 - Thread affinity 可避免每個請求都來回切換帳號。啟用配額自動切換後，長時間執行的 thread 會被
-  定期重新評估；當相關 usage 達到閾值，並且存在使用率確實更低的可用帳號時，該 thread 可能會
+  定期重新評估；當相關 usage 達到闡值，並且存在使用率確實更低的可用帳號時，該 thread 可能會
   重新繫結。
 - 新 session 可以選擇 usage 最低的可用帳號。付費計劃按已知 5h、每週、30d 視窗中的最高使用率
   評分；Go/Free 計劃只使用 30d 視窗。
