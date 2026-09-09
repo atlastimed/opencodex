@@ -23,6 +23,10 @@ sınırında gerçekleşir. Dinleyiciyi ve kabul anahtarlarını
 genel model kimliği birkaç hedef arasından seçim yapması gerektiğinde
 [Kombolar](/tr/guides/combos/) kullanın.
 
+## Üst sunucu yönlendirmeleri
+
+Kimlik bilgisi taşıyan model, görsel, video ve arama istekleri, aynı origin içindeki yönlendirmeler dâhil HTTP yönlendirmelerini otomatik izlemez. Yönlendiren bir adres yerine son API URL’sini yapılandırın. Sunucu, kimlik bilgilerini veya istek gövdesini yönlendirme hedefine yeniden göndermez. Mevcut hata işleme ve yanıt aktarma davranışı korunur; native Responses ve compact yolları, özgün 3xx ve `Location` değerini istemciye döndürebilir. İstemcinin yönlendirme davranışı bu sunucu aktarım politikasından ayrıdır.
+
 ## Uç nokta genel bakışı
 
 | İstemci yüzeyi | Uç nokta | Başarılı akışsız sonuç | Başarılı akış veya soket sonucu |
