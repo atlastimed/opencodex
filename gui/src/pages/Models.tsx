@@ -1209,4 +1209,203 @@ export default function Models({ apiBase, restartEpoch = 0 }: { apiBase: string;
       }
       await Promise.all([loadPresets(), load()]);
     } catch (error) {
-      publishFeedback(false, error instanceof Error ? error.message : 
+      publishFeedback(false, error instanceof Error ? error.message : String(error));
+    } finally {
+      setPresetBusy(null);
+      setBusy(false);
+      busyRef.current = false;
+      catalogMutationRef.current = false;
+    }
+  };
+
+  const setKeepNativeChatGptOnV1 = async (next: boolean) => {
+    if (!v2 || v2.keepNativeChatGptOnV1 === next) return;
+    await putV2Setting({ keepNativeChatGptOnV1: next });
+  };
+
+  const putV2Threads = async (value: number) => {
+    // Same guards as the flag toggle: single-flight + server-side idempotence
+    // (setMaxConcurrentThreads no-ops on equal value), so a re-selected current
+    // value or a double click can never double-write config.toml.
+    if (!v2 || v2BusyRef.current) return;
+    if (!Number.isInteger(value) || value < 1) { publishFeedback(false, t("models.v2ThreadsInvalid")); return; }
+    if (v2.maxConcurrentThreadsPerSession === value) return;
+    setV2Busy(true);
+    v2BusyRef.current = true;
+    setV2Note("");
+    setStatus("");
+    try {
+      const r = await fetch(`${apiBase}/api/v2`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxConcurrentThreadsPerSession: value }),
+      });
+      try {
+        const data = await readJsonOrThrow<V2Status & { warnings?: string[] }>(r, t("models.saveFailed"));
+        if (!data || typeof data.enabled !== "boolean") {
+          setOk(false);
+          setStatus(t("models.saveFailed"));
+          return;
+        }
+        setV2({
+          enabled: data.enabled,
+          agentsMaxThreadsConflict: data.agentsMaxThreadsConflict === true,
+          maxConcurrentThreadsPerSession: typeof data.maxConcurrentThreadsPerSession === "number" ? data.maxConcurrentThreadsPerSession : null,
+          multiAgentMode: data.multiAgentMode === "v1" || data.multiAgentMode === "v2" ? data.multiAgentMode : "default",
+          keepNativeChatGptOnV1: data.keepNativeChatGptOnV1 === true,
+        });
+        setOk(true);
+        setStatus(t("models.v2ThreadsApplied"));
+        setShowThreadsCustom(false);
+      } catch (e) {
+        setOk(false);
+        setStatus(e instanceof Error ? e.message : t("models.saveFailed"));
+      }
+    } catch {
+      setOk(false); setStatus(t("models.networkError"));
+    } finally {
+      setV2Busy(false);
+      v2BusyRef.current = false;
+    }
+  };
+
+  const onSelectThreads = (raw: string) => {
+    if (raw === CUSTOM_OPTION) { setShowThreadsCustom(true); setThreadsCustom(String(v2?.maxConcurrentThreadsPerSession ?? "")); return; }
+    setShowThreadsCustom(false);
+    void putV2Threads(Number(raw));
+  };
+
+  const onRowEnter = (namespaced: string, el: HTMLElement) => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      setHoveredModel({ namespaced, rect: el.getBoundingClientRect() });
+    }, 300);
+  };
+
+  const onRowFocus = (namespaced: string, el: HTMLElement) => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    setHoveredModel({ namespaced, rect: el.getBoundingClientRect() });
+  };
+
+  const onRowLeave = () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setHoveredModel(null), 120);
+  };
+
+  const keepRowTipOpen = () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+  };
+
+  const addCustomModel = async (
+    provider: string,
+    modelId: string,
+    displayName?: string,
+    contextWindow?: number,
+    inputModalities?: string[],
+    reasoningEfforts?: string[],
+  ) => {
+    setCustomSaving(true);
+    setCustomError("");
+    try {
+      const r = await fetch(`${apiBase}/api/custom-models`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, modelId, displayName, contextWindow, inputModalities, reasoningEfforts }),
+      });
+      try {
+        await readJsonOrThrow(r, t("models.customSaveFailed"));
+        setCustomModalOpen(false);
+        publishFeedback(true, t("models.customAdded"));
+        await load(true);
+      } catch (e) {
+        setCustomError(e instanceof Error ? e.message : t("models.customSaveFailed"));
+      }
+    } catch {
+      setCustomError(t("models.networkError"));
+    } finally {
+      setCustomSaving(false);
+    }
+  };
+
+  const updateCustomModel = async (id: string, patch: Record<string, unknown>) => {
+    setCustomSaving(true);
+    setCustomError("");
+    try {
+      const r = await fetch(`${apiBase}/api/custom-models/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      try {
+        await readJsonOrThrow(r, t("models.customSaveFailed"));
+        setCustomModalOpen(false);
+        publishFeedback(true, t("models.customUpdated"));
+        await load(true);
+      } catch (e) {
+        setCustomError(e instanceof Error ? e.message : t("models.customSaveFailed"));
+      }
+    } catch {
+      setCustomError(t("models.networkError"));
+    } finally {
+      setCustomSaving(false);
+    }
+  };
+
+  const deleteCustomModel = async (id: string) => {
+    try {
+      const r = await fetch(`${apiBase}/api/custom-models/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (r.ok) {
+        publishFeedback(true, t("models.customDeleted"));
+        await load(true);
+      } else {
+        publishFeedback(false, t("models.customSaveFailed"));
+      }
+    } catch {
+      publishFeedback(false, t("models.networkError"));
+    }
+  };
+
+  const catalog = catalogState.data ?? cached;
+
+  /*
+   * Catalog loading and cold failure belong to the CATALOG PANEL, not the page.
+   *
+   * These used to be component-level early returns, which is correct for a page that is
+   * only a catalog and wrong for a page that owns three tabs: a slow or failed catalog
+   * would unmount the whole workspace, tab strip included, taking every sibling panel
+   * and any unsaved combo draft with it — and on a cold failure the user could not even
+   * reach Combos or Routing. Rendered below inside the catalog panel instead.
+   */
+  const catalogColdFailure = catalogState.kind === "failed-cold"
+    ? (catalogState.error instanceof Error ? catalogState.error.message : t("models.loadFail"))
+    : null;
+  const catalogCold = catalogState.showSkeleton && !catalog;
+
+  const selectedModelMap = selectedModels ?? {};
+
+  const renderGroup = (group: ProviderModelGroup<ModelRow>) => {
+    const { provider, rows, nativeProviderGroup, liveModels, discovery } = group;
+    const isCollapsed = collapsed.has(provider);
+    // Final visibility, not just the disable flag: a model is visible to Codex only when the
+    // provider allowlist admits it AND it is not disabled. Reading `disabled` alone made the
+    // switches disagree with what the picker actually offers.
+    const isVisible = (model: ModelRow) => modelVisible(
+      selectedModelMap,
+      provider,
+      model.id,
+      model.native === true,
+      disabled.has(model.namespaced),
+    );
+    const activeCount = rows.filter(isVisible).length;
+    const recentForProvider = modelDiscovery?.recentArrivals[provider] ?? [];
+    const recentIds = new Set(recentForProvider.map(row => row.id));
+    const capOn = contextCaps[provider] !== undefined;
+    // Show the value the next enable will actually use, including a remembered selection.
+    const capDisplayValue = contextCaps[provider] ?? contextCapValues[provider] ?? contextCapValue;
+    // The native group offers only the three windows GPT-5.6 actually has contracts for
+    // (272k live, 372k legacy, 1.05M measured); routed providers keep the generic ladder.
+    // The set has to follow the list, or a saved value outside it loses its option.
+    const capOptions = group.nativeProviderGroup ? NATIVE_CAP_OPTIONS : CAP_OPTIONS;
+    const capOptionSet = group.nativeProviderGroup ? NATIVE_CAP_OPTION_SET : CAP_OPTION_SET;
+    const discoveryFailure = liveModels && discovery?.status === "failed" ? discovery : undefined;
+    cons
