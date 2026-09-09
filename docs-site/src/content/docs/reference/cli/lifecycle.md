@@ -55,6 +55,11 @@ closed without an `ensure` or stop/start fallback. After confirming ownership, u
 `ocx start` for a standalone proxy. For a service-managed proxy, use `ocx stop` followed by
 `ocx service start` so supervision is restored.
 
+Port recovery after stop or update respects a failed OCX process check even when the PID was
+recorded before shutdown. A rejected live holder is left running and prevents TCP-row cleanup.
+If it stays unverified, the bounded recovery wait can expire with the port still busy. Check the
+current port holder and retry the restart after the conflict is resolved.
+
 ### `ocx ensure`
 
 Idempotently ensure a background proxy is running, then sync its live model catalog. If
