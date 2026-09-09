@@ -339,4 +339,146 @@ export default function Models({ apiBase, restartEpoch = 0 }: { apiBase: string;
   const [v2HelpOpen, setV2HelpOpen] = useState(false);
   const [customModalOpen, setCustomModalOpen] = useState(false);
   const [displayNameModel, setDisplayNameModel] = useState<ModelRow | null>(null);
-  const [priceModel, setPriceModel] = us
+  const [priceModel, setPriceModel] = useState<ModelRow | null>(null);
+  const priceTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [displayNameSaving, setDisplayNameSaving] = useState(false);
+  const [displayNameRequestError, setDisplayNameRequestError] = useState<string | null>(null);
+  const [displayNameRecovery, setDisplayNameRecovery] = useState<{
+    value: string | null | undefined;
+    confirmed: boolean;
+  } | null>(null);
+  const [displayNameCurrentPending, setDisplayNameCurrentPending] = useState(false);
+  const displayNameRequestRef = useRef<BoundedFetch | null>(null);
+  const displayNameSavingRef = useRef(false);
+  useEffect(() => () => {
+    displayNameRequestRef.current?.controller.abort();
+    displayNameRequestRef.current?.clear();
+    displayNameRequestRef.current = null;
+  }, []);
+  const displayNameTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const reloadAliases = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch(`${apiBase}/api/aliases`, { signal });
+    const data = await readJsonIfOk<AliasView>(response);
+    if (data && !signal?.aborted) setAliases(data);
+  }, [apiBase]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void reloadAliases(controller.signal);
+    return () => controller.abort();
+  }, [reloadAliases]);
+
+  const saveProviderAlias = async (provider: string) => {
+    const entered = window.prompt(t("models.aliasPrompt"), aliases.providers[provider] ?? "");
+    if (entered === null) return;
+    const response = await fetch(`${apiBase}/api/providers/${encodeURIComponent(provider)}/alias`, {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ alias: entered.trim() || null }),
+    });
+    if (!response.ok) { publishFeedback(false, t("models.aliasConflict")); return; }
+    await reloadAliases();
+    publishFeedback(true, t("models.aliasSaved"));
+  };
+
+  const saveModelAlias = async (provider: string, model: string) => {
+    const current = aliases.models[provider]?.[model]?.alias ?? "";
+    const entered = window.prompt(t("models.modelAliasPrompt"), current);
+    if (entered === null) return;
+    const body = entered.trim() ? { set: { [model]: entered.trim() } } : { remove: [model] };
+    const response = await fetch(`${apiBase}/api/providers/${encodeURIComponent(provider)}/model-aliases`, {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (!response.ok) { publishFeedback(false, t("models.aliasConflict")); return; }
+    await reloadAliases();
+    publishFeedback(true, t("models.aliasSaved"));
+  };
+
+  const setDefaultAliases = async (enabled: boolean, provider?: string) => {
+    const response = await fetch(`${apiBase}/api/default-aliases`, {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled, ...(provider ? { provider } : {}) }),
+    });
+    if (response.ok) await reloadAliases();
+  };
+  const [customModalMode, setCustomModalMode] = useState<"add" | "edit">("add");
+  const [customModalProvider, setCustomModalProvider] = useState("");
+  const [customModalId, setCustomModalId] = useState("");
+  const [customFormModelId, setCustomFormModelId] = useState("");
+  const [customFormDisplayName, setCustomFormDisplayName] = useState("");
+  const [customFormContextWindow, setCustomFormContextWindow] = useState("");
+  const [customFormShowCustomCtx, setCustomFormShowCustomCtx] = useState(false);
+  const [customFormModalities, setCustomFormModalities] = useState<string[]>(["text"]);
+  const [customFormReasoning, setCustomFormReasoning] = useState(false);
+  const [customFormReasoningEfforts, setCustomFormReasoningEfforts] = useState<string[]>([]);
+  // Whether the ladder has been seeded at least once. `[]` is a MEANINGFUL explicit
+  // no-reasoning override, so initialization is tracked separately from the array contents:
+  // once seeded (an edit's stored ladder — including an explicit empty one — or a new form's
+  // first enable), re-enabling the override preserves the current array even when empty.
+  const customFormReasoningInitializedRef = useRef(false);
+  const [customSaving, setCustomSaving] = useState(false);
+  const [customError, setCustomError] = useState("");
+  const [contextModalProvider, setContextModalProvider] = useState<string | null>(null);
+  const [contextModalModels, setContextModalModels] = useState<string[]>([]);
+  const [contextModelId, setContextModelId] = useState("");
+  const [contextDefaultDraft, setContextDefaultDraft] = useState("");
+  const [contextModelDrafts, setContextModelDrafts] = useState<Record<string, string>>({});
+  // What the modal showed when it opened. Every payload decision compares against THIS, not
+  // against the live `groups`, because the 10s poll can refresh a value mid-modal: diffing
+  // against current state would mark an untouched field dirty and revert someone else's change.
+  const [contextSnapshot, setContextSnapshot] = useState<{
+    contextWindow: number | null;
+    modelContextWindows: Record<string, number | null>;
+  }>({ contextWindow: null, modelContextWindows: {} });
+  // Which fields the USER typed into. Touch alone is not enough to send — a value typed and
+  // then restored is not a change — but it is what makes an untouched field ineligible.
+  const [contextTouchedModels, setContextTouchedModels] = useState<Set<string>>(new Set());
+  const [contextDefaultTouched, setContextDefaultTouched] = useState(false);
+  const [contextSaving, setContextSaving] = useState(false);
+  const [contextError, setContextError] = useState("");
+  const [hoveredModel, setHoveredModel] = useState<{ namespaced: string; rect: DOMRect } | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [shadowCall, setShadowCall] = useState<ShadowCallData | null>(null);
+  const [shadowCallSaving, setShadowCallSaving] = useState(false);
+
+  // App owns the in-session view mode; fallback to persisted mode for isolated renders/tests.
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+
+  useEffect(() => () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+  }, []);
+
+  const shadowModelOptions = useMemo(
+    () => activeModelOptions(models, disabled, selectedModels ?? {}, t),
+    [models, disabled, selectedModels, t],
+  );
+  const shadowCallOptions = useMemo(() => {
+    const activeNamespaced = new Set(shadowModelOptions.map(option => option.value));
+    return shadowCallModelOptions(
+      models.filter(model => activeNamespaced.has(model.namespaced)),
+      shadowCall?.model,
+      shadowCall?.sourceModels,
+    );
+  }, [models, shadowCall?.model, shadowCall?.sourceModels, shadowModelOptions]);
+
+  const loadShadowCall = useCallback(async () => {
+    const bounded = createBoundedFetch(15_000);
+    try {
+      const r = await fetch(`${apiBase}/api/shadow-call-settings`, { signal: bounded.signal });
+      const data = await readJsonIfOk<ShadowCallData>(r);
+      if (data) setShadowCall(data);
+    } catch { /* old server / network: keep the section disabled */ }
+    finally { bounded.clear(); }
+  }, [apiBase]);
+
+  const loadV2 = useCallback(async () => {
+    // Never let a toggle in flight be clobbered by the poll (same single-flight rule as models).
+    if (v2BusyRef.current) return;
+    const bounded = createBoundedFetch(15_000);
+    try {
+      const r = await fetch(`${apiBase}/api/v2`, { signal: bounded.signal });
+      if (!(r.headers.get("content-type") ?? "").includes("application/json")) { setV2(null); return; }
+      const data = await readJsonIfOk<V2Status>(r);
+      if (!data || typeof data.enabled !== "boolean") { setV2(null); return; }
+      setV2({
+        enabled: data.enabled,
+        agentsMaxThreadsConflict: data.agentsMaxThreadsConflict === true,
+        maxConcurrentThreadsPerSession: typeof data.maxConcurrentThreadsPerSession === "number" ? data.maxConcurrentThreadsPerSession : null,
+        multiAgentMode: data
