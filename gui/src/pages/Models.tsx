@@ -1148,3 +1148,153 @@ export default function Models({ apiBase, restartEpoch = 0 }: { apiBase: string;
 
 
   /**
+   * #2465: load the per-provider preset preview. Rules are evaluated server-side against the
+   * CURRENT catalog, so the count shown is the count an apply would produce.
+   */
+  const loadPresets = async () => {
+    try {
+      const bounded = createBoundedFetch(15_000);
+      const r = await fetch(`${apiBase}/api/model-presets`, { signal: bounded.signal });
+      const data = await readJsonIfOk<{ providers?: Record<string, ModelPresetView> }>(r);
+      setPresets(data?.providers ?? {});
+    } catch {
+      // A preset preview is decoration on top of a working Models page; failing to load it must
+      // not take the page down.
+      setPresets({});
+    }
+  };
+
+  const loadModelDiscovery = async () => {
+    try {
+      const r = await fetch(`${apiBase}/api/model-discovery`);
+      setModelDiscovery((await readJsonIfOk<ModelDiscoveryView>(r)) ?? null);
+    } catch { setModelDiscovery(null); }
+  };
+
+  const saveModelDiscovery = async (policy: "on" | "off", provider?: string) => {
+    const r = await fetch(`${apiBase}/api/model-discovery`, {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ policy, provider: provider ?? null }),
+    });
+    await readJsonIfOk(r);
+    await Promise.all([loadModelDiscovery(), load()]);
+  };
+
+  const applyPreset = async (provider: string, mode: "preset" | "all") => {
+    if (catalogMutationRef.current) return;
+    catalogMutationRef.current = true;
+    setPresetBusy(provider);
+    setBusy(true);
+    busyRef.current = true;
+    try {
+      const bounded = createBoundedFetch(30_000);
+      const r = await fetch(`${apiBase}/api/model-presets`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider, mode }),
+        signal: bounded.signal,
+      });
+      const res = await readJsonOrThrow<{ fallback?: string; selected?: string[]; clientIntegrations?: unknown }>(r, t("models.saveFailed"));
+      if (!res) throw new Error(t("models.saveFailed"));
+      if (res.fallback === "preset-empty") {
+        // Never silently narrow to nothing: the server kept the previous selection, so say so
+        // rather than showing a success that changed nothing.
+        publishFeedback(false, t("models.presetEmpty", { provider }));
+      } else {
+        const failures = clientCatalogRefreshFailures(res);
+        if (failures !== undefined) setIntegrationFailures(failures);
+        publishFeedback(true, mode === "all"
+          ? t("models.presetClearedToast", { provider })
+          : t("models.presetAppliedToast", { provider, count: String(res.selected?.length ?? 0) }));
+      }
+      await Promise.all([loadPresets(), load()]);
+    } catch (error) {
+      publishFeedback(false, error instanceof Error ? error.message : String(error));
+    } finally {
+      setPresetBusy(null);
+      setBusy(false);
+      busyRef.current = false;
+      catalogMutationRef.current = false;
+    }
+  };
+
+  const setKeepNativeChatGptOnV1 = async (next: boolean) => {
+    if (!v2 || v2.keepNativeChatGptOnV1 === next) return;
+    await putV2Setting({ keepNativeChatGptOnV1: next });
+  };
+
+  const putV2Threads = async (value: number) => {
+    // Same guards as the flag toggle: single-flight + server-side idempotence
+    // (setMaxConcurrentThreads no-ops on equal value), so a re-selected current
+    // value or a double click can never double-write config.toml.
+    if (!v2 || v2BusyRef.current) return;
+    if (!Number.isInteger(value) || value < 1) { publishFeedback(false, t("models.v2ThreadsInvalid")); return; }
+    if (v2.maxConcurrentThreadsPerSession === value) return;
+    setV2Busy(true);
+    v2BusyRef.current = true;
+    setV2Note("");
+    setStatus("");
+    try {
+      const r = await fetch(`${apiBase}/api/v2`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxConcurrentThreadsPerSession: value }),
+      });
+      try {
+        const data = await readJsonOrThrow<V2Status & { warnings?: string[] }>(r, t("models.saveFailed"));
+        if (!data || typeof data.enabled !== "boolean") {
+          setOk(false);
+          setStatus(t("models.saveFailed"));
+          return;
+        }
+        setV2({
+          enabled: data.enabled,
+          agentsMaxThreadsConflict: data.agentsMaxThreadsConflict === true,
+          maxConcurrentThreadsPerSession: typeof data.maxConcurrentThreadsPerSession === "number" ? data.maxConcurrentThreadsPerSession : null,
+          multiAgentMode: data.multiAgentMode === "v1" || data.multiAgentMode === "v2" ? data.multiAgentMode : "default",
+          keepNativeChatGptOnV1: data.keepNativeChatGptOnV1 === true,
+        });
+        setOk(true);
+        setStatus(t("models.v2ThreadsApplied"));
+        setShowThreadsCustom(false);
+      } catch (e) {
+        setOk(false);
+        setStatus(e instanceof Error ? e.message : t("models.saveFailed"));
+      }
+    } catch {
+      setOk(false); setStatus(t("models.networkError"));
+    } finally {
+      setV2Busy(false);
+      v2BusyRef.current = false;
+    }
+  };
+
+  const onSelectThreads = (raw: string) => {
+    if (raw === CUSTOM_OPTION) { setShowThreadsCustom(true); setThreadsCustom(String(v2?.maxConcurrentThreadsPerSession ?? "")); return; }
+    setShowThreadsCustom(false);
+    void putV2Threads(Number(raw));
+  };
+
+  const onRowEnter = (namespaced: string, el: HTMLElement) => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      setHoveredModel({ namespaced, rect: el.getBoundingClientRect() });
+    }, 300);
+  };
+
+  const onRowFocus = (namespaced: string, el: HTMLElement) => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    setHoveredModel({ namespaced, rect: el.getBoundingClientRect() });
+  };
+
+  const onRowLeave = () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setHoveredModel(null), 120);
+  };
+
+  const keepRowTipOpen = () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+  };
+
+  const addCustomModel = async (
+    provider: string,
