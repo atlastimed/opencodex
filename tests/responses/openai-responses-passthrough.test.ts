@@ -1461,6 +1461,47 @@ describe("OpenAI Responses passthrough sanitization", () => {
     expect(body.tools[0]?.parameters).toEqual({ ...parameters, type: "object" });
   });
 
+  test("drops unicode property-escape patterns on the codex forward path", () => {
+    // Claude Code 2.1.265 puts `\p{Cc}` in the `pattern` of its built-in Artifact tool. The
+    // ChatGPT backend compiles `pattern` with Python `re`, which has no property escapes, and
+    // answers "Invalid schema for function 'Artifact': … is not a 'regex'" — so every request
+    // from such a client fails, whether or not the tool is ever called.
+    const field = '^(?!__.*__$)[^\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}"\\\\./[\\]]{1,200}$';
+    const collection = "^(?!\\.\\.?(?:/|$))[A-Za-z0-9_\\-.~:@+]{1,200}$";
+    const request = createResponsesPassthroughAdapter(provider).buildRequest({
+      modelId: "test-model",
+      context: { messages: [] },
+      stream: true,
+      options: {},
+      _rawBody: {
+        model: "test-model",
+        input: [],
+        tools: [{
+          type: "function",
+          name: "Artifact",
+          parameters: {
+            type: "object",
+            properties: {
+              field: { type: "string", pattern: field },
+              collection: { type: "string", pattern: collection },
+            },
+          },
+        }],
+      },
+    }, { headers: new Headers() });
+    const body = JSON.parse(request.body) as {
+      tools: Array<{ name: string; parameters: { properties: Record<string, Record<string, unknown>> } }>;
+    };
+    const properties = body.tools[0]?.parameters.properties;
+
+    expect(body.tools).toHaveLength(1);
+    expect(body.tools[0]?.name).toBe("Artifact");
+    expect(properties.field.pattern).toBeUndefined();
+    expect(properties.field.type).toBe("string");
+    // Lookaheads compile under Python `re`, so only the incompatible pattern is dropped.
+    expect(properties.collection.pattern).toBe(collection);
+  });
+
   test("model reasoning-summary opt-out strips unsupported delivery fields (#323)", () => {
     const adapter = createResponsesPassthroughAdapter({
       adapter: "openai-responses",
