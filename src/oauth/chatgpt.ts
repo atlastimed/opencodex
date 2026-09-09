@@ -106,6 +106,33 @@ export function extractEmail(idToken?: string, accessToken?: string): string | u
   return undefined;
 }
 
+/**
+ * Identity-agreement view of one token for security-sensitive bindings. `accountId` follows the
+ * existing extractAccountId precedence (top-level, then namespaced, then organizations[0]).
+ * `conflict` is true only when the two chatgpt_account_id encodings are both present and
+ * disagree — organizations entries are workspace memberships, not identity, so they never
+ * participate. Never logs token material.
+ */
+export function extractAccountIdClaims(token?: string): { accountId: string | undefined; conflict: boolean } {
+  if (!token) return { accountId: undefined, conflict: false };
+  const payload = decodeJwtPayload(token);
+  if (!payload) return { accountId: undefined, conflict: false };
+  const top = typeof payload.chatgpt_account_id === "string" ? payload.chatgpt_account_id : undefined;
+  const ns = payload["https://api.openai.com/auth"];
+  const namespaced = ns && typeof ns === "object"
+    && typeof (ns as Record<string, unknown>).chatgpt_account_id === "string"
+    ? (ns as Record<string, unknown>).chatgpt_account_id as string
+    : undefined;
+  const orgs = payload.organizations;
+  const org = Array.isArray(orgs) && orgs[0] && typeof orgs[0].id === "string"
+    ? orgs[0].id as string
+    : undefined;
+  return {
+    accountId: top ?? namespaced ?? org,
+    conflict: top !== undefined && namespaced !== undefined && top !== namespaced,
+  };
+}
+
 export function credsFromToken(data: Record<string, unknown>): OAuthCredentials {
   const idToken = typeof data.id_token === "string" ? data.id_token : undefined;
   // This parses a response from an external boundary, so the access token is
