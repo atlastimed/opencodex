@@ -2478,6 +2478,8 @@ export const zhTW: Record<TKey, string> = {
   "dash.visionAdvancedPopover": "進階視覺設定",
   "dash.codexDesktopAuthless": "無需登入即可開啟 Codex",
   "dash.codexDesktopAuthlessHint": "預設關閉。為符合條件的本機連線略過獨立的 Desktop 登入。仍需上游供應商憑證。變更後請重新啟動 Codex。依賴帳戶的 Desktop 功能可能無法使用。",
+  "dash.codexClientCompaction": "使用用戶端壓縮",
+  "dash.codexClientCompactionHint": "預設關閉，僅適用於已驗證的 loopback 路由。未來壓縮會儲存可攜的純文字摘要，同時保留 OpenCodeX 與 V2 提供方路由；已設定的提供方可能處理摘要並消耗其額度。既有 ocx1 歷程仍須另行復原。變更後請重新啟動 Codex。",
   "models.newPolicyGlobal": "新模型預設停用", "models.newPolicyProvider": "新模型策略",
   "models.newPolicy_inherit": "繼承", "models.newPolicy_off": "關閉", "models.newPolicy_on": "開啟", "models.newBadge": "新增", "models.newCount": "{count} 個新增，已關閉",
   "models.aliases": "別名",

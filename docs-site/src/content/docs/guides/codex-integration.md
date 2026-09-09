@@ -280,6 +280,74 @@ The cache remains bounded; this does not extend retention or recover history the
 longer has. HTTP clients must handle the error explicitly and resend their full context without
 `previous_response_id`. Retrying only the same ID cannot recover missing state.
 
+### Client-side compaction (opt-in)
+
+Authenticated loopback routing normally keeps Codex on its built-in `openai` provider identity.
+That preserves native thread identity, but it also makes Codex request native remote compaction.
+When a routed provider cannot return a native compaction blob, OpenCodeX stores the summary in its
+own `ocx1:` envelope. Native ChatGPT cannot verify that envelope if OpenCodeX is later removed from
+the request path.
+
+On an authenticated loopback route, enable client-side compaction to keep V2 sub-agent routing while preventing new `ocx1:` compaction summaries. Non-loopback and API-key routes retain their existing provider and authentication behavior:
+
+```bash
+ocx system settings --client-compaction on   # or "codexClientCompaction": true in config.json
+ocx sync                                     # rewrites the active config (default: ~/.codex/config.toml); restart Desktop
+```
+
+The setting defaults to off. For authenticated loopback routing, OpenCodeX selects its existing
+dedicated provider form with `requires_openai_auth = true`. If `codexDesktopAuthless` is also
+enabled, that stronger compatibility setting takes precedence and writes
+`requires_openai_auth = false`:
+
+```toml
+model_provider = "opencodex"
+
+[model_providers.opencodex]
+name = "OpenCodex Proxy"
+base_url = "http://127.0.0.1:10100/v1"
+wire_api = "responses"
+requires_openai_auth = true
+```
+
+Codex then owns compaction and stores a portable plaintext summary rather than a new OpenCodeX
+envelope. The compacting request still routes through OpenCodeX and can consume quota on the
+selected provider. V2 sub-agent requests keep their existing provider selection and quota
+accounting. Client-side compaction does not change plaintext delivery, encrypted task passthrough
+through `allowEncryptedV2AgentTasks`, or configured recovery and fallback behavior.
+
+This preference affects future compactions only, and it rewrites no existing `ocx1:` payload in
+any configuration, so use the explicit history recovery workflow for a thread that needs one.
+
+Whether resume-history metadata is re-tagged depends on which form the injection takes. On its
+own, on an authenticated loopback bind, client-side compaction re-tags nothing: it keeps the root
+override instead, as described below. Enabled together with `codexDesktopAuthless`, or on a
+non-loopback bind, the stronger form wins and those forms behave exactly as they do today,
+including their existing forward-tagging of resume history with originals backed up for restore.
+
+Going back from one of those forms to plain Design B migrates the re-tagged threads back. Turning
+off `codexDesktopAuthless` while leaving client-side compaction on does not: that lands on the
+compaction-only form, which skips the history unit, so threads already tagged `opencodex` keep
+that tag. They still reach this proxy, through the provider table rather than the root override.
+
+On the compaction-only form, existing threads keep working because the injection keeps the root
+`openai_base_url` override alongside the provider table. New threads default to `opencodex` and
+get client-side compaction, while a thread already tagged `openai` still resolves to Codex's
+built-in provider — which the retained override still points at this proxy. Without it that
+thread would resume against OpenAI directly, taking configured routing with it. The authless and
+non-loopback forms cannot use the root key, which is why they keep re-tagging instead.
+
+That guarantee covers the override OpenCodeX manages. A root `openai_base_url` you wrote
+yourself is never replaced, and in that case the built-in provider keeps the destination you
+chose, so an `openai`-tagged thread follows your configuration rather than this proxy. Turning
+the setting off and syncing removes the table and returns to the plain Design B override, unless
+`codexDesktopAuthless` or non-loopback admission still requires the provider-table form; those
+two forms cannot use the root key and are unchanged.
+
+While the mode is active, the realtime voice sideband override
+(`experimental_realtime_ws_base_url`) is not injected — the dedicated provider-table form cannot
+carry it — so Codex Desktop voice uses its native endpoint rather than the proxy.
+
 ### Authless Codex Desktop (opt-in)
 
 In **Dashboard → Overview**, **Open Codex without signing in** controls this existing

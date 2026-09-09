@@ -2493,6 +2493,8 @@ export const de: Record<TKey, string> = {
   "dash.visionAdvancedPopover": "Erweiterte Vision-Einstellungen",
   "dash.codexDesktopAuthless": "Codex ohne Anmeldung öffnen",
   "dash.codexDesktopAuthlessHint": "Standardmäßig aus. Überspringt die separate Desktop-Anmeldung bei geeigneten lokalen Verbindungen. Zugangsdaten für den Anbieter bleiben erforderlich. Codex nach einer Änderung neu starten. Kontogebundene Desktop-Funktionen können fehlen.",
+  "dash.codexClientCompaction": "Clientseitige Komprimierung verwenden",
+  "dash.codexClientCompactionHint": "Standardmäßig aus; nur für authentifiziertes Loopback-Routing. Künftige Komprimierungen speichern portable Klartext-Zusammenfassungen, während das OpenCodeX-Provider-Routing und die V2-Subagent-Zustellung aktiv bleiben; der konfigurierte Anbieter kann sie verarbeiten und Kontingent verbrauchen. Vorhandene ocx1-Verläufe müssen weiterhin wiederhergestellt werden. Codex nach einer Änderung neu starten.",
   "models.newPolicyGlobal": "Neue Modelle zunächst deaktivieren", "models.newPolicyProvider": "Richtlinie für neue Modelle",
   "models.newPolicy_inherit": "Übernehmen", "models.newPolicy_off": "Aus", "models.newPolicy_on": "An", "models.newBadge": "NEU", "models.newCount": "{count} neu, aus",
   "models.aliases": "Aliase",

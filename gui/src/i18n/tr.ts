@@ -2516,6 +2516,8 @@ export const tr: Record<TKey, string> = {
   "dash.visionAdvancedPopover": "Gelişmiş görsel ayarları",
   "dash.codexDesktopAuthless": "Codex’i oturum açmadan başlat",
   "dash.codexDesktopAuthlessHint": "Varsayılan olarak kapalıdır. Uygun yerel bağlantılarda ayrı Desktop oturum açma adımını atlar. Sağlayıcı kimlik bilgileri yine gereklidir. Değişiklikten sonra Codex’i yeniden başlatın. Hesaba bağlı Desktop özellikleri kullanılamayabilir.",
+  "dash.codexClientCompaction": "İstemci tarafı sıkıştırmayı kullan",
+  "dash.codexClientCompactionHint": "Varsayılan olarak kapalıdır ve yalnızca kimliği doğrulanmış geri döngü yönlendirmesinde geçerlidir. Gelecekteki sıkıştırmalar, OpenCodeX ve V2 sağlayıcı yönlendirmesi etkin kalırken taşınabilir düz metin özetleri kaydeder; yapılandırılmış sağlayıcı bunları işleyip kotasını tüketebilir. Mevcut ocx1 geçmişi yine ayrıca kurtarılmalıdır. Değişiklikten sonra Codex’i yeniden başlatın.",
   "models.newPolicyGlobal": "Yeni modeller devre dışı başlasın", "models.newPolicyProvider": "Yeni model ilkesi",
   "models.newPolicy_inherit": "Devral", "models.newPolicy_off": "Kapalı", "models.newPolicy_on": "Açık", "models.newBadge": "YENİ", "models.newCount": "{count} yeni, kapalı",
   "models.aliases": "Takma adlar",
