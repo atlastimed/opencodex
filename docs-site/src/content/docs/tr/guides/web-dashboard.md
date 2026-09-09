@@ -54,7 +54,7 @@ kararıdır.
 | **Sağlayıcı ekle** | Hesap girişi, API anahtarı hizmetleri, yerel sunucular veya özel bir uç nokta için kayıt defteri destekli önayarları arayın. |
 | **Codex Auth** | ChatGPT/Codex havuz hesapları ekleyin, sonraki oturum hesabını seçin, 5 saatlik / haftalık / 30 günlük kotaları yenileyin, kota otomatik geçişini etkinleştirin veya devre dışı bırakın, %1–100 eşiğini ayarlayın ve geçici arıza yük devretmesini yapılandırın. |
 | **Alt Ajanlar** | `spawn_agent` geçersiz kılma listesinde en fazla beş yalın yerel veya ad alanlı yönlendirilen modeli öne çıkarın. |
-| **Modeller** | Yerel GPT ve yönlendirilen modelleri açıp kapatın, sağlayıcı izin listelerini ve bağlam sınırlarını ayarlayın, v1/base/v2'yi seçin ve v2 iş parçacığı sınırını yapılandırın. Yapılandırılmış sağlayıcılar, keşif kapalı olduğunda veya hiçbir satır döndürmediğinde sıfır modelli gruplar olarak görünür kalır. |
+| **Modeller** | Yerel GPT ve yönlendirilen modelleri açıp kapatın, sağlayıcı izin listelerini ve bağlam sınırlarını ayarlayın, v1/base/v2'yi seçin ve v2 iş parçacığı sınırını yapılandırın. Yapılandırılmış sağlayıcılar, keşif kapalı olduğunda veya hiçbir satır döndürmediğinde sıfır modelli gruplar olarak görünür kalır. Canlı keşif açıkken katalog alınamazsa yapılandırılmış ve özel modeller listede kalır; grup başarısızlık nedenini ve Sağlayıcı ayarlarına (`#providers`) bir bağlantı gösterir. **Sağlayıcıdan canlı model keşfet** o sayfadadır. |
 | **Günlükler** | Belirteçler, talep edilen çaba ve (varsa) etkili giden çaba, çözümlenen model, sağlayıcı, durum, istek kimliği, süre ve hata ayrıntılarıyla son istekleri otomatik yenileyin. Ayrıntı görünümü, adaptör bir tane yaydığında tam akıl yürütme hat alanını içerir. Yüklenen Günlükler halkası için toplam belirteçleri ve tahmini liste fiyatı maliyetini görmek üzere donuk görüşme/oturum kimliğine göre (istemci bir tane gönderdiğinde) filtreleyin. |
 | **Kullanım / Hata Ayıklama** | Belirteç kullanımı kapsamını ve eğilimlerini inceleyin veya isteğe bağlı sağlayıcı aktarımı ve kullanım çıkarma tanılamalarını etkinleştirin. |
 | **Depolama** | Salt okunur CODEX_HOME disk dökümü (oturumlar, arşivler, DB'ler, ekler). İsteğe bağlı arşivlenmiş temizleme: en eski %N'yi önizleyin, ardından `CODEX_HOME/.trash` konumuna karantinaya alın (varsayılan) veya açık bir onay kutusu arkasında kalıcı olarak silin. **Otomatik temizleme politikası** isteğe bağlıdır ve **varsayılan olarak KAPALIDIR** (`storageCleanupPolicy.enabled`); Depolama sayfasında eşik/hedef/zamanlama/mod yapılandırın veya **Şimdi çalıştır (Run now)**'ı tetikleyin. Karantinaya alınan girdiler Depolama sayfasından geri yüklenebilir (JSONL + iş parçacıkları). Aktif oturumlar salt okunur kalır. Codex en yeni/aktif `state_*.sqlite` dosyasını kilitli tuttuğu sürece temizleme ve geri yükleme reddedilir. |
@@ -171,7 +171,7 @@ ve diğer sağlayıcılardan ayrıdır.
   bir sıraya düşer. Değişen bir sıra bir sonraki bağımsız istekten itibaren
   geçerlidir ve zaten bağlı olan bir iş parçacığını asla taşımaz. Codex Desktop
   (ana) hesabı diğerleri gibi sıralanır, böylece **Son** olarak ayarlanabilir ve
-  yedek olarak tutulabilir. Bu beş önayarın dışındaki `ocx account priority`'den
+  yedek olarak tutulabilir. Bu beş önayarla dışındaki `ocx account priority`'den
   ayarlanan bir sıra kartta görünür ve seçilebilir kalır.
 - İş parçacığı bağlılığı istek başına dalgalanmayı önler. Kota otomatik geçişi
   etkinken uzun süredir çalışan bir iş parçacığı düzenli olarak yeniden
