@@ -998,3 +998,153 @@ export default function Models({ apiBase, restartEpoch = 0 }: { apiBase: string;
         const data = await readJsonOrThrow<ProviderContextCapsResponse>(r, t("models.capSaveFailed"));
         if (typeof data?.value === "number" && Number.isFinite(data.value) && data.value > 0) setContextCapValue(data.value);
         setContextCaps(data?.caps ?? {});
+        setContextCapValues(data?.values ?? data?.caps ?? {});
+        setOk(true);
+        setStatus(t("models.capApplied"));
+        await load(true);
+      } catch (e) {
+        setOk(false);
+        setStatus(e instanceof Error ? e.message : t("models.capSaveFailed"));
+      }
+    } catch {
+      setOk(false); setStatus(t("models.networkError"));
+    } finally {
+      setBusy(false);
+      busyRef.current = false;
+    }
+  };
+
+  const allCapped = useMemo(
+    () => {
+      // Cap aggregate counts routed providers only; the single native group has no cap
+      // switch. Zero-row routed providers are included: they can still hold a per-provider
+      // cap (e.g. a custom model added later), and excluding them would let "set all"
+      // silently overwrite that cap when the global value changes. Saved caps of providers
+      // that are no longer in `groups` (e.g. disabled after receiving a custom cap) are
+      // also counted: the management API rewrites every key in providerContextCaps when
+      // setAll is true, so any saved cap that differs from the current value must keep the
+      // aggregate off.
+      const routed = groups.filter(group => !group.native);
+      return routed.length > 0
+        && routed.every(group => contextCaps[group.provider] === contextCapValue)
+        && Object.keys(contextCaps).every(key => contextCaps[key] === contextCapValue);
+    },
+    [groups, contextCaps, contextCapValue],
+  );
+
+  const setGlobalCap = (value: number) => {
+    if (!Number.isSafeInteger(value) || value <= 0) return;
+    // Only when "apply to every routed provider" is checked does the new value re-point every
+    // provider; otherwise it just becomes the default for future toggles and providers keep
+    // their own values.
+    void putCap(allCapped ? { value, setAll: true } : { value });
+  };
+
+  const onSelectProviderCap = (provider: string, raw: string) => {
+    if (raw === CUSTOM_OPTION) {
+      setProviderCapCustomOpen(prev => ({ ...prev, [provider]: true }));
+      setProviderCapCustomDraft(prev => ({ ...prev, [provider]: String(contextCaps[provider] ?? contextCapValues[provider] ?? contextCapValue) }));
+      return;
+    }
+    setProviderCapCustomOpen(prev => ({ ...prev, [provider]: false }));
+    const value = Number(raw);
+    if (Number.isSafeInteger(value) && value > 0 && value !== contextCaps[provider]) {
+      void putCap({ provider, enabled: true, value });
+    }
+  };
+
+  const applyProviderCustomCap = (provider: string) => {
+    const value = Number((providerCapCustomDraft[provider] ?? "").replace(/[_,\s]/g, ""));
+    // Fractional values are rejected (the server floors, so 0.5 would silently become 0).
+    // The editor stays open when validation fails.
+    if (!Number.isSafeInteger(value) || value <= 0) { publishFeedback(false, t("models.capSaveFailed")); return; }
+    setProviderCapCustomOpen(prev => ({ ...prev, [provider]: false }));
+    void putCap({ provider, enabled: true, value });
+  };
+
+  const onSelectCap = (raw: string) => {
+    if (raw === CUSTOM_OPTION) { setShowCustom(true); setCustomCap(String(contextCapValue)); return; }
+    setShowCustom(false);
+    const value = Number(raw);
+    if (Number.isSafeInteger(value) && value > 0 && value !== contextCapValue) setGlobalCap(value);
+  };
+
+  const applyCustomCap = () => {
+    const value = Number(customCap.replace(/[_,\s]/g, ""));
+    if (!Number.isSafeInteger(value) || value <= 0) { publishFeedback(false, t("models.capSaveFailed")); return; }
+    setShowCustom(false);
+    setGlobalCap(value);
+  };
+
+  const setAll = () => { void putCap({ setAll: !allCapped }); };
+
+  const saveShadowCall = async (patch: Partial<ShadowCallData>) => {
+    if (!shadowCall || shadowCallSaving) return;
+    setShadowCallSaving(true);
+    setShadowCall({ ...shadowCall, ...patch });
+    try {
+      await fetch(`${apiBase}/api/shadow-call-settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+    } finally {
+      setShadowCallSaving(false);
+    }
+  };
+
+  /**
+   * Both v2 surface writes adopt the response directly instead of calling
+   * `loadV2()`. `loadV2` returns early while `v2BusyRef` is still held by the
+   * in-flight write, so the refetch was a no-op and the control kept its old
+   * value until the next 10s poll. That is visible here: "Keep ChatGPT on v1"
+   * only renders while the mode is v2, so a stale mode also delayed the row.
+   */
+  const putV2Setting = async (body: Record<string, unknown>) => {
+    if (!v2 || v2BusyRef.current) return;
+    setV2Busy(true);
+    v2BusyRef.current = true;
+    setV2Note("");
+    setStatus("");
+    try {
+      const r = await fetch(`${apiBase}/api/v2`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      try {
+        const data = await readJsonOrThrow<V2Status & { warnings?: string[] }>(r, t("models.saveFailed"));
+        if (!data || typeof data.enabled !== "boolean") {
+          setOk(false);
+          setStatus(t("models.saveFailed"));
+          return;
+        }
+        setV2({
+          enabled: data.enabled,
+          agentsMaxThreadsConflict: data.agentsMaxThreadsConflict === true,
+          maxConcurrentThreadsPerSession: typeof data.maxConcurrentThreadsPerSession === "number" ? data.maxConcurrentThreadsPerSession : null,
+          multiAgentMode: data.multiAgentMode === "v1" || data.multiAgentMode === "v2" ? data.multiAgentMode : "default",
+          keepNativeChatGptOnV1: data.keepNativeChatGptOnV1 === true,
+        });
+        setOk(true);
+        setStatus(t("models.v2Applied"));
+        setV2Note((data.warnings ?? []).join(" "));
+      } catch (e) {
+        setOk(false);
+        setStatus(e instanceof Error ? e.message : t("models.saveFailed"));
+      }
+    } catch {
+      setOk(false); setStatus(t("models.networkError"));
+    } finally {
+      setV2Busy(false);
+      v2BusyRef.current = false;
+    }
+  };
+
+  const setMultiAgentMode = async (mode: "v1" | "default" | "v2") => {
+    if (!v2 || v2.multiAgentMode === mode) return;
+    await putV2Setting({ multiAgentMode: mode });
+  };
+
+
+  /**
