@@ -83,6 +83,34 @@ adding a `[features]` table.
 Fast mode is separate from voice transport. A supported model's service-tier speed description
 does not guarantee lower microphone, WebRTC, or end-to-end voice latency through OpenCodex.
 
+### ChatGPT-family channel and latency
+
+Requests routed through opencodex via the canonical ChatGPT-login `openai` provider — adapter
+`openai-responses`, `authMode: "forward"`, and the `https://chatgpt.com/backend-api/codex`
+endpoint, covering both Pool and Direct modes — use the public ChatGPT endpoint. Provider routing
+or account selection does not bypass the upstream ChatGPT channel. The upstream may spend time
+queueing a request before the first output even when the local proxy and network path are healthy.
+
+Only some turns take the ChatGPT websocket transport — the same `responses_websockets` lane Codex
+CLI defaults to. A turn is eligible when the Bun runtime supports the bounded relay, the request
+is a `POST` to the canonical Responses URL or a configured WebSocket route, and its JSON body sets
+`stream` to `true` at the root. Everything else stays on SSE over HTTP, and an eligible turn still
+falls back to it when the request cannot be prepared, the `response.create` frame exceeds its size
+limit, or the proxy route cannot carry the socket.
+
+Local provider pacing can also hold a request before it is dispatched at all. So a slow first
+output has several possible contributors, and upstream queueing is only one of them. `ocx doctor`
+classifies configuration and measures none of these: compare actual transport, pacing, network,
+and provider observations before concluding. This routing behavior is specific to ChatGPT-login
+forwarding and does not apply to `openai-apikey` or custom providers, which connect directly to
+their respective API endpoints without public ChatGPT channel queueing.
+
+`service_tier: priority` is a request preference. On the ChatGPT backend the echoed
+`service_tier` cannot confirm or deny the granted tier: turns scheduled as priority can still
+echo `default`, so request logs show the response tier as an observation with confirmation
+`assumed`. For latency-sensitive work, compare observed first-output times across the providers you
+actually use rather than assuming any particular channel is faster.
+
 The proxy listens on port `10100` by default and serves `POST /v1/responses`,
 `POST /v1/responses/compact`, `POST /v1/images/generations`, `POST /v1/images/edits`,
 `GET /v1/models`, `GET /healthz`, and the `/api/*` management surface.
