@@ -550,6 +550,10 @@ test("failed HTTP discovery renders an amber status badge and reason", () => {
   const html = renderHint(true, { status: "failed", reason: "http", httpStatus: 401 });
   expect(html).toContain("Discovery failed");
   expect(html).toContain("HTTP 401");
+  expect(html).toContain("Live model discovery is enabled");
+  expect(html).toContain("Listed custom and configured models stay available");
+  expect(html).toContain("Discover models from provider");
+  expect(html).toContain("turn it off to use only those models");
   expect(html).toContain('class="badge badge-amber"');
   expect(html).toContain('role="status"');
   expect(html).toContain('class="link-btn"');
