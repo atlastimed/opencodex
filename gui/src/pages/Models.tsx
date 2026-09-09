@@ -698,3 +698,153 @@ export default function Models({ apiBase, restartEpoch = 0 }: { apiBase: string;
   }, [apiBase, displayNameModel, displayNameRecovery, finishDisplayNameEdit, load, publishFeedback, t]);
 
   // Shadow/v2 controls must not wait on the models catalog (live discovery can be slow).
+  useEffect(() => {
+    // Both belong to the catalog tab; a hidden panel polling /api/v2 every ten seconds
+    // is the same leak as the catalog poll above.
+    if (!catalogActive) return;
+    const timeout = window.setTimeout(() => {
+      void loadShadowCall();
+      void loadV2();
+      // Preset previews belong to the same tab. Loaded once rather than polled: the rules are
+      // shipped code and the catalog poll above already refreshes the rows they describe.
+      void loadPresets();
+      void loadModelDiscovery();
+    }, 0);
+    // Hidden tab: no timer, no /api/v2 traffic; the make-up tick refreshes on return.
+    const stop = startVisibilityPoll(() => {
+      if (!v2BusyRef.current) void loadV2();
+    }, 10_000);
+    return () => {
+      window.clearTimeout(timeout);
+      stop();
+    };
+    // oxlint-disable-next-line react/react-compiler -- existing exhaustive-deps exception is intentional
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadPresets is a plain async loader
+    // like the rest of this file's; a useCallback wrapper trips PreserveManualMemo, and the
+    // effect only ever needs the current closure. Verified 2026-08-27: converting both loaders
+    // to useCallback and completing the dep array turns ONE warning into five react-compiler
+    // errors - two PreserveManualMemo, two Immutability (they are declared ~430 lines below this
+    // effect), and one EffectSetState - so the note above still holds against oxlint 1.78.
+    // Both gates suppress this one rule for this one file by config rather than by comment:
+    // gui/.oxlintrc.json (override) and gui/doctor.config.json (ignore.overrides). An in-file
+    // react-doctor-disable comment was tried and removed - it changed nothing, and
+    // react/react-compiler penalises a component for carrying suppressions at all.
+  }, [catalogActive, loadShadowCall, loadV2]);
+
+  const groups = useMemo(
+    () => buildProviderModelGroups(models, providers),
+    [models, providers],
+  );
+
+  /*
+   * The catalog count is only honest once a seed or a real response has landed. With
+   * the catalog gated, a cold load straight to `#models/combos` never fetches it, and
+   * rendering "0/0" would present unknown as fact.
+   */
+  const catalogCountReady = models.length > 0 || catalogState.data !== undefined;
+
+  const openContextSettings = (group: ProviderModelGroup<ModelRow>) => {
+    const modelIds = [...new Set([
+      ...group.rows.map(model => model.id),
+      ...group.configuredModels,
+      // A model that vanished from live discovery can still hold an override. Without this it
+      // would sit in the drafts map, invisible in the picker, with no way to inspect or clear it.
+      ...Object.keys(group.modelContextWindows ?? {}),
+    ])].sort();
+    const modelId = modelIds[0] ?? "";
+    setContextModalProvider(group.provider);
+    setContextModalModels(modelIds);
+    setContextModelId(modelId);
+    const defaultDraft = group.contextWindow ? String(group.contextWindow) : "";
+    const modelDrafts = Object.fromEntries(
+      Object.entries(group.modelContextWindows ?? {})
+        .map(([model, window]) => [model, String(window)]),
+    );
+    setContextDefaultDraft(defaultDraft);
+    setContextModelDrafts(modelDrafts);
+    // Canonical numbers, not the raw strings. "64,000" and "64_000" and "64000" are the same
+    // value, and comparing text would treat a reformat as an edit — then Apply would send a
+    // stale number over whatever changed while the modal was open.
+    setContextSnapshot({
+      contextWindow: group.contextWindow ?? null,
+      modelContextWindows: Object.fromEntries(
+        Object.entries(group.modelContextWindows ?? {}).map(([model, window]) => [model, window]),
+      ),
+    });
+    setContextTouchedModels(new Set());
+    setContextDefaultTouched(false);
+    setContextError("");
+  };
+
+  const selectContextModel = (modelId: string) => {
+    setContextModelId(modelId);
+  };
+
+  const saveContextSettings = async () => {
+    if (!contextModalProvider) return;
+    const providerWindow = parseContextWindowDraft(contextDefaultDraft);
+    const group = groups.find(candidate => candidate.provider === contextModalProvider);
+    if (!group) {
+      setContextError(t("models.contextSaveFailed"));
+      return;
+    }
+
+    // A field is sent only when the user touched it AND its value actually differs from what
+    // the modal opened with. Both halves matter, and each one alone is wrong.
+    //
+    // Sending only the selected model — what this did before — silently dropped any model
+    // edited before switching the picker. No error, no warning, the value just did not save.
+    //
+    // Sending everything that differs from the LIVE state is wrong the other way: the 10s poll
+    // can refresh a field mid-modal, and a stale draft would then look dirty and revert a
+    // change the user never made. Comparing against the opening snapshot instead means a value
+    // typed and then restored sends nothing at all.
+    // Only validate the default when the user touched it. A malformed value inherited from a
+    // hand-edited config would otherwise block a save that never intended to touch it.
+    if (contextDefaultTouched && providerWindow === undefined) {
+      setContextError(t("models.contextInvalid"));
+      return;
+    }
+    const modelWindows: Record<string, number | null> = {};
+    for (const modelId of contextTouchedModels) {
+      const draft = contextModelDrafts[modelId] ?? "";
+      const parsed = parseContextWindowDraft(draft);
+      if (parsed === undefined) {
+        setContextError(t("models.contextInvalid"));
+        return;
+      }
+      // Compare VALUES, not text. Retyping 64000 as "64,000" is not a change.
+      if (parsed === (contextSnapshot.modelContextWindows[modelId] ?? null)) continue;
+      modelWindows[modelId] = parsed;
+    }
+    const defaultChanged = contextDefaultTouched
+      && providerWindow !== contextSnapshot.contextWindow;
+
+    // Nothing survived the comparison: every edit was reverted before Apply. Writing an
+    // unchanged payload would still stamp over concurrent edits.
+    if (!defaultChanged && Object.keys(modelWindows).length === 0) {
+      setContextModalProvider(null);
+      // Not "updated" — nothing was. Saying otherwise would be a small lie the user could
+      // act on, e.g. believing a value they typed and reverted had been written.
+      publishFeedback(true, t("models.contextUnchanged"));
+      return;
+    }
+
+    setContextSaving(true);
+    setContextError("");
+    try {
+      const body: Record<string, unknown> = {};
+      if (defaultChanged) body.contextWindow = providerWindow;
+      if (Object.keys(modelWindows).length > 0) body.modelContextWindows = modelWindows;
+      const response = await fetch(
+        `${apiBase}/api/providers?name=${encodeURIComponent(contextModalProvider)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      await readJsonOrThrow(response, t("models.contextSaveFailed"));
+    } catch (error) {
+      setContextError(error instanceof Error ? error.message : t("models.contextSaveFailed"));
+      return;
