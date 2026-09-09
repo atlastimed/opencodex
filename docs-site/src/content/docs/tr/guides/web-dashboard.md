@@ -171,7 +171,7 @@ ve diğer sağlayıcılardan ayrıdır.
   bir sıraya düşer. Değişen bir sıra bir sonraki bağımsız istekten itibaren
   geçerlidir ve zaten bağlı olan bir iş parçacığını asla taşımaz. Codex Desktop
   (ana) hesabı diğerleri gibi sıralanır, böylece **Son** olarak ayarlanabilir ve
-  yedek olarak tutulabilir. Bu beş önayarla dışındaki `ocx account priority`'den
+  yedek olarak tutulabilir. Bu beş önayarın dışındaki `ocx account priority`'den
   ayarlanan bir sıra kartta görünür ve seçilebilir kalır.
 - İş parçacığı bağlılığı istek başına dalgalanmayı önler. Kota otomatik geçişi
   etkinken uzun süredir çalışan bir iş parçacığı düzenli olarak yeniden
