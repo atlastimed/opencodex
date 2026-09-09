@@ -76,3 +76,13 @@ import {
 import { DiscoveryFailedHint, EmptyProviderHint } from "./models-provider-hints";
 import { shadowCallModelOptions } from "./dashboard-shared";
 import { shadowSourceModelBadge, shadowSourceModelLabel } from "./shadow-call-source";
+
+type CachedModelsPage = {
+  models: ModelRow[];
+  providers: ConfiguredProviderSummary[];
+  selectedModels: ProviderModelMap;
+  disabled: string[];
+  contextCaps: Record<string, number>;
+  contextCapValues?: Record<string, number>;
+  contextCapValue: number;
+};
