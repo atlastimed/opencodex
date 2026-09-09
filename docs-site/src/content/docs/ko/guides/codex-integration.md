@@ -7,6 +7,12 @@ opencodex는 Codex가 읽는 두 가지, 즉 설정(`$CODEX_HOME/config.toml`, �
 
 프록시는 bare `openai` Codex 로그인 경로 하나와 Pool(기본) 및 Direct 계정 모드, 그리고 설정된 API 키용 `openai-apikey/<model>`을 제공합니다. Pool은 메인 계정과 추가된 계정을 포함하고, Direct는 호출자/메인 bearer만 사용합니다. 경로들은 서로 fallback하지 않습니다. shipped v1 config는 marker 2로 이관되며, 수동 복원을 위해 `config.json.pre-openai-tiers-v2.bak`를 보존합니다.
 
+Pool 모드에서는 선택된 저장 계정이 쿨다운 중이고 사용 가능한 다른 저장 계정이나 복구 probe가
+없을 때, 요청에 포함된 검증된 native Codex 로그인을 사용할 수 있습니다. 상류 거절 후 재시도와
+같은 호출자 검증을 적용하므로, 전송 전에 막힌 새 요청도 이 경로를 사용할 수 있습니다. 기존 모델
+권한과 main 계정 정책 검사는 유지됩니다. 이 fallback은 저장 계정의 쿨다운을 해제하거나 호출자
+인증을 Pool 선택으로 저장하지 않습니다. 특정 계정에 정확히 고정된 요청은 그 계정에 계속 묶입니다.
+
 ## 설정 주입
 
 `ocx init`, `ocx start`, `ocx sync`는 모두 인젝터를 호출합니다. 기본 loopback 바인드에서는 Codex의 빌트인 `openai` 프로바이더 id를 그대로 유지한 채, 그 프로바이더가 opencodex를 바라보게 합니다.
@@ -250,7 +256,9 @@ ChatGPT 계정을 Codex account pool에 추가하면, opencodex는 이를 저장
 
 ## 네이티브 Codex 복원
 
-opencodex는 절대 사용자를 가두지 않습니다. **`ocx stop`은 네이티브 Codex로 완전히 되돌리는 단일 명령입니다**. proxy를 중지하고, 설치된 background service가 있으면 그것도 중지한 뒤, 주입된 모든 라인과 라우팅된 catalog 항목을 제거해서 plain `codex`가 opencodex가 처음부터 없었던 것처럼 정확히 동작하게 합니다:
+`ocx stop`은 proxy와 설치된 background service를 중지한 뒤 네이티브 Codex 복원을 시도합니다. OpenCodex 소유로 확인된 라우팅 항목을 제거하며, 설정 파일을 안전하게 복구할 수 없으면 미완료로 보고합니다.
+
+현재 config 또는 profile이 저장된 원본과 다르고 해당 파일의 주입 상태 해시가 저널에 없으면, 자동 snapshot 복원은 두 파일과 저널을 변경하지 않고 검토용으로 남깁니다. 이미 원본과 같은 파일은 다시 쓰지 않습니다. 기존 라우팅 설정의 재주입도 이 불확실한 원본을 사용하지 않으며, 네이티브 설정에서는 새 snapshot을 만들 수 있습니다. [자세한 복구 규칙](/guides/codex-integration/#recovery-without-injection-hashes)을 참고하세요.
 
 ```bash
 ocx stop       # stop the proxy + service, restore native Codex
